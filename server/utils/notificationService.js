@@ -3,18 +3,23 @@ import nodemailer from 'nodemailer';
 import path from 'path';
 
 export const sendEmergencyNotifications = async (user, alertData) => {
-    // 1. USE THE ROBUST CONFIGURATION (Fixes the freezing/blocking issue)
+    
+    // --- 1. SETUP TRANSPORTER (Use SSL Port 465 for Cloud Reliability) ---
     const transporter = nodemailer.createTransport({
-        host: 'smtp.gmail.com', // Explicitly verify server
-        port: 587,              // Use TLS Port (Firewall friendly)
-        secure: false,          // False for TLS
+        host: 'smtp.gmail.com',
+        port: 465,              // SWITCHED TO PORT 465
+        secure: true,           // TRUE for Port 465
         auth: {
             user: process.env.EMAIL_USER,
             pass: process.env.EMAIL_PASS
         },
         tls: {
-            rejectUnauthorized: false // Fixes "Self Signed Certificate" errors from Antivirus
-        }
+            rejectUnauthorized: false
+        },
+        // --- 2. INCREASE PATIENCE (Fixes Timeouts) ---
+        connectionTimeout: 30000, // Wait 30 seconds
+        greetingTimeout: 15000,   // Wait 15 seconds for Hello
+        socketTimeout: 30000      // Keep socket open longer
     });
 
     console.log(`\n--- 🚨 INITIATING REAL EMAIL BROADCAST FOR: ${user.username} 🚨 ---`);
@@ -26,20 +31,16 @@ export const sendEmergencyNotifications = async (user, alertData) => {
 
     const lat = alertData.location.latitude;
     const lng = alertData.location.longitude;
-    
-    // 2. FIXED TYPO: Changed 0{lat} to ${lat}
     const mapLink = `http://googleusercontent.com/maps.google.com/maps?q=${lat},${lng}`;
     
-    // 3. PREPARE ATTACHMENTS
     const emailAttachments = [];
     if (alertData.audioUrl) {
         emailAttachments.push({
             filename: 'Evidence-Audio.webm',
-            path: `.${alertData.audioUrl}`
+            path: `.${alertData.audioUrl}` 
         });
     }
 
-    // 4. Loop through contacts
     for (const contact of user.contacts) {
         const messageBody = `
             URGENT: SOS ALERT TRIGGERED!
@@ -49,13 +50,14 @@ export const sendEmergencyNotifications = async (user, alertData) => {
             
             📍 Live Location: ${mapLink}
             
-            ${alertData.audioUrl ? `🎙️ Audio Evidence Attached to this email.` : ''}
+            ${alertData.audioUrl ? `🎙️ Audio Evidence Attached.` : ''}
             
             Time: ${new Date().toLocaleString()}
         `;
 
         if (contact.type === 'EMAIL') {
             try {
+                // 3. SEND WITH AWAIT
                 await transporter.sendMail({
                     from: `"Ghost Protocol HQ" <${process.env.EMAIL_USER}>`,
                     to: contact.value,
