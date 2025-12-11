@@ -6,61 +6,68 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-// Helper to fix file paths in ES Modules
+// Helper to get directory name in ES Modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// @desc    Create a new Emergency Alert
-// @route   POST /api/alerts
 export const createAlert = async (req, res) => {
     try {
         const { userId, type, location, audioData } = req.body;
 
-        let audioUrl = '';
+        const user = await User.findById(userId);
+        if (!user) return res.status(404).json({ message: "User not found" });
 
-        // --- BLACK BOX LOGIC: SAVE AUDIO ---
+        let audioUrl = null;
+
+        // --- THE FIX: CREATE FOLDER IF MISSING ---
         if (audioData) {
-            // 1. Create a unique filename
-            const fileName = `evidence-${userId}-${Date.now()}.webm`;
-            const filePath = path.join(__dirname, '../evidence', fileName);
-
-            // 2. Convert Base64 back to binary and save
-            // Remove the "data:audio/webm;base64," prefix
-            const buffer = Buffer.from(audioData.split(',')[1], 'base64');
+            const base64Data = audioData.replace(/^data:audio\/webm;base64,/, "");
             
-            fs.writeFileSync(filePath, buffer);
-            console.log(`🎙️ AUDIO EVIDENCE SAVED: ${fileName}`);
+            // 1. Define the folder path
+            const evidenceDir = path.join(__dirname, '../evidence');
+
+            // 2. Check and Create Directory recursively
+            if (!fs.existsSync(evidenceDir)) {
+                fs.mkdirSync(evidenceDir, { recursive: true });
+            }
+
+            // 3. Define file path and Save
+            const fileName = `evidence-${userId}-${Date.now()}.webm`;
+            const filePath = path.join(evidenceDir, fileName);
+
+            fs.writeFileSync(filePath, base64Data, 'base64');
             
             audioUrl = `/evidence/${fileName}`;
+            console.log(`🎙️ AUDIO EVIDENCE SAVED: ${fileName}`);
         }
 
-        // 1. Save Alert to Database
-        const alert = await Alert.create({
+        const newAlert = new Alert({
             user: userId,
-            type: type || 'PANIC_BUTTON',
-            location: {
-                latitude: location.latitude,
-                longitude: location.longitude,
-                address: location.address || 'Unknown Location'
-            },
-            audioUrl: audioUrl, // Save the link
-            status: 'ACTIVE'
+            type,
+            location,
+            audioUrl
         });
 
-        // 2. Notify Contacts
-        const user = await User.findById(userId);
-        if (user && user.contacts.length > 0) {
-            sendEmergencyNotifications(user, alert);
-        }
+        await newAlert.save();
 
-        res.status(201).json({
-            success: true,
-            message: 'SOS SIGNAL RECEIVED',
-            alertId: alert._id
-        });
+        // Send Email (Don't await this, let it run in background so UI is fast)
+        sendEmergencyNotifications(user, { ...newAlert.toObject(), audioUrl }).catch(err => 
+            console.error("Background Email Error:", err)
+        );
+
+        res.status(201).json(newAlert);
 
     } catch (error) {
-        console.error("Alert Error:", error);
-        res.status(500).json({ message: error.message });
+        console.error("Alert Error:", error); // This is where you saw the error!
+        res.status(500).json({ message: "Server Error", error: error.message });
+    }
+};
+
+export const getAlerts = async (req, res) => {
+    try {
+        const alerts = await Alert.find({ user: req.user.id }).sort({ createdAt: -1 });
+        res.json(alerts);
+    } catch (error) {
+        res.status(500).json({ message: "Server Error" });
     }
 };
