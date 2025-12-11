@@ -8,12 +8,16 @@ import connectDB from './config/db.js';
 import authRoutes from './routes/authRoutes.js';
 import alertRoutes from './routes/alertRoutes.js';
 import userRoutes from './routes/userRoutes.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 // 1. Config
 dotenv.config();
 connectDB();
 
 const app = express();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // --- THE FIX: ALLOW ALL ORIGINS (CORS) ---
 // This tells the server: "Don't block the mobile app."
@@ -26,6 +30,8 @@ app.use(cors({
 // Increase limits for Audio files
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+app.use('/evidence', express.static(path.join(__dirname, '/evidence')));
 
 const server = http.createServer(app);
 
