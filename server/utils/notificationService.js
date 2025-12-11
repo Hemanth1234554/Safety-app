@@ -1,38 +1,24 @@
 // File: server/utils/notificationService.js
 import nodemailer from 'nodemailer';
-import path from 'path';
 
 export const sendEmergencyNotifications = async (user, alertData) => {
     
-    // --- 1. SETUP TRANSPORTER (Use SSL Port 465 for Cloud Reliability) ---
+    // --- SENDGRID CONFIGURATION ---
     const transporter = nodemailer.createTransport({
-        host: 'smtp.gmail.com',
-        port: 465,              // SWITCHED TO PORT 465
-        secure: true,           // TRUE for Port 465
+        service: 'SendGrid', // Tells Nodemailer to use SendGrid's settings
         auth: {
-            user: process.env.EMAIL_USER,
-            pass: process.env.EMAIL_PASS
-        },
-        tls: {
-            rejectUnauthorized: false
-        },
-        // --- 2. INCREASE PATIENCE (Fixes Timeouts) ---
-        connectionTimeout: 30000, // Wait 30 seconds
-        greetingTimeout: 15000,   // Wait 15 seconds for Hello
-        socketTimeout: 30000      // Keep socket open longer
+            user: 'apikey', // This must ALWAYS be the string "apikey"
+            pass: process.env.SENDGRID_API_KEY // Your SG.xxxx key
+        }
     });
 
-    console.log(`\n--- 🚨 INITIATING REAL EMAIL BROADCAST FOR: ${user.username} 🚨 ---`);
-
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-        console.error("❌ CRITICAL ERROR: Email credentials missing.");
-        return;
-    }
+    console.log(`\n--- 🚨 INITIATING SENDGRID BROADCAST FOR: ${user.username} 🚨 ---`);
 
     const lat = alertData.location.latitude;
     const lng = alertData.location.longitude;
     const mapLink = `http://googleusercontent.com/maps.google.com/maps?q=${lat},${lng}`;
     
+    // Prepare Attachment
     const emailAttachments = [];
     if (alertData.audioUrl) {
         emailAttachments.push({
@@ -57,23 +43,18 @@ export const sendEmergencyNotifications = async (user, alertData) => {
 
         if (contact.type === 'EMAIL') {
             try {
-                // 3. SEND WITH AWAIT
                 await transporter.sendMail({
-                    from: `"Ghost Protocol HQ" <${process.env.EMAIL_USER}>`,
+                    from: process.env.EMAIL_USER, // Must match the "Verified Sender" in SendGrid
                     to: contact.value,
                     subject: `🚨 SOS ALERT: ${user.username} needs help!`,
                     text: messageBody,
                     attachments: emailAttachments
                 });
-                console.log(`✅ [EMAIL SENT] To ${contact.name} (${contact.value})`);
+                console.log(`✅ [EMAIL SENT] To ${contact.name}`);
             } catch (error) {
                 console.error(`❌ [EMAIL FAILED] To ${contact.name}:`, error.message);
             }
         } 
-        else if (contact.type === 'PHONE') {
-            console.log(`📱 [SMS SIMULATION] To ${contact.name}: ${messageBody}`);
-        }
     }
-    
     console.log(`--- ✅ BROADCAST COMPLETE ---\n`);
 };
