@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// --- 1. CREATE ALERT (SOS) ---
 export const createAlert = async (req, res) => {
     try {
         const { userId, type, location, audioData } = req.body;
@@ -19,22 +20,21 @@ export const createAlert = async (req, res) => {
 
         let audioUrl = null;
 
-        // --- THE FIX: CREATE FOLDER IF MISSING ---
+        // Save Audio Evidence if it exists
         if (audioData) {
             const base64Data = audioData.replace(/^data:audio\/webm;base64,/, "");
             
-            // 1. Define the folder path
+            // Define folder and file paths
             const evidenceDir = path.join(__dirname, '../evidence');
+            const fileName = `evidence-${userId}-${Date.now()}.webm`;
+            const filePath = path.join(evidenceDir, fileName);
 
-            // 2. Check and Create Directory recursively
+            // Create folder if missing
             if (!fs.existsSync(evidenceDir)) {
                 fs.mkdirSync(evidenceDir, { recursive: true });
             }
 
-            // 3. Define file path and Save
-            const fileName = `evidence-${userId}-${Date.now()}.webm`;
-            const filePath = path.join(evidenceDir, fileName);
-
+            // Write file
             fs.writeFileSync(filePath, base64Data, 'base64');
             
             audioUrl = `/evidence/${fileName}`;
@@ -50,7 +50,7 @@ export const createAlert = async (req, res) => {
 
         await newAlert.save();
 
-        // Send Email (Don't await this, let it run in background so UI is fast)
+        // Send Email in background
         sendEmergencyNotifications(user, { ...newAlert.toObject(), audioUrl }).catch(err => 
             console.error("Background Email Error:", err)
         );
@@ -58,16 +58,19 @@ export const createAlert = async (req, res) => {
         res.status(201).json(newAlert);
 
     } catch (error) {
-        console.error("Alert Error:", error); // This is where you saw the error!
+        console.error("Alert Error:", error);
         res.status(500).json({ message: "Server Error", error: error.message });
     }
 };
 
+// --- 2. GET ALERTS (HISTORY) ---
 export const getAlerts = async (req, res) => {
     try {
+        // req.user.id comes from the "protect" middleware we just added
         const alerts = await Alert.find({ user: req.user.id }).sort({ createdAt: -1 });
         res.json(alerts);
     } catch (error) {
+        console.error("Fetch History Error:", error);
         res.status(500).json({ message: "Server Error" });
     }
 };
