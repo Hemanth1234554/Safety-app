@@ -63,11 +63,17 @@ export const createAlert = async (req, res) => {
     }
 };
 
+// ... (Previous createAlert code remains the same) ...
+
+// --- ADD THIS FUNCTION AT THE BOTTOM ---
 export const getAlerts = async (req, res) => {
     try {
+        // req.user.id comes from the 'protect' middleware
+        // .sort({ createdAt: -1 }) means show newest alerts first
         const alerts = await Alert.find({ user: req.user.id }).sort({ createdAt: -1 });
         res.json(alerts);
     } catch (error) {
+        console.error("Error fetching history:", error);
         res.status(500).json({ message: "Server Error" });
     }
 };
