@@ -52,7 +52,7 @@ io.on("connection", (socket) => {
     });
 
     socket.on("ice_candidate", (data) => {
-        // console.log(`❄️ ICE Candidate from ${socket.id}`); // Keeping this quiet to avoid spam
+        console.log(`❄️ ICE Candidate from ${socket.id}`); 
         socket.to(data.roomId).emit("ice_candidate", data.candidate);
     });
 
