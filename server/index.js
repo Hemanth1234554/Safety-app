@@ -34,25 +34,29 @@ const io = new Server(server, {
     cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
+// File: server/index.js (Update the socket section)
+
 io.on("connection", (socket) => {
-    // 1. Spy joins a room with their User ID
+    // 1. Join Room
     socket.on("join_room", (roomId) => {
         socket.join(roomId);
         console.log(`🔌 User joined room: ${roomId}`);
+        
+        // NEW: Tell everyone in the room a new person arrived
+        socket.to(roomId).emit("user_connected", socket.id);
     });
 
-    // 2. Spy sends "Offer" (I want to stream video)
+    // 2. Offer (Broadcaster -> Viewer)
     socket.on("offer", (data) => {
-        // Broadcast to everyone else in the room (The Viewer)
         socket.to(data.roomId).emit("offer", data.offer);
     });
 
-    // 3. Viewer sends "Answer" (I accept the stream)
+    // 3. Answer (Viewer -> Broadcaster)
     socket.on("answer", (data) => {
         socket.to(data.roomId).emit("answer", data.answer);
     });
 
-    // 4. Network Candidates (Helping find a path through the firewall)
+    // 4. ICE Candidates
     socket.on("ice_candidate", (data) => {
         socket.to(data.roomId).emit("ice_candidate", data.candidate);
     });
