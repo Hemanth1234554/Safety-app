@@ -5,16 +5,19 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
-import alertRoutes from './routes/alertRoutes.js'; // Ensure path is correct
+
+// 1. IMPORT YOUR ROUTES
+import alertRoutes from './routes/alertRoutes.js'; 
+import authRoutes from './routes/authRoutes.js'; // <--- NEW: Import Auth
+import userRoutes from './routes/userRoutes.js'; // <--- NEW: Import Users/Contacts
 
 dotenv.config();
 
 const app = express();
 
-// 1. ALLOW VERCEL TO TALK TO SERVER (CORS)
 app.use(cors({
-    origin: "*", // Allow all connections (easiest for debugging)
-    methods: ["GET", "POST"],
+    origin: "*", 
+    methods: ["GET", "POST", "PUT", "DELETE"], // Added PUT/DELETE just in case
     credentials: true
 }));
 app.use(express.json());
@@ -24,46 +27,40 @@ mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log("✅ MongoDB Connected"))
     .catch(err => console.error("❌ MongoDB Error:", err));
 
-// Routes
+// 2. USE YOUR ROUTES
 app.use('/api/alerts', alertRoutes);
+app.use('/api/auth', authRoutes);   // <--- NEW: Enable Login/Register
+app.use('/api/users', userRoutes);  // <--- NEW: Enable Contacts
+
 app.get('/', (req, res) => res.send('Ghost Eye Server is Running 👁️'));
 
-// 2. SETUP SOCKET SERVER
+// SETUP SOCKET SERVER
 const server = http.createServer(app);
 
 const io = new Server(server, {
     cors: {
-        origin: "*", // CRITICAL: Allow sockets from Vercel
+        origin: "*",
         methods: ["GET", "POST"]
     }
 });
 
-// 3. THE SIGNALING LOGIC (The "Operator")
 io.on("connection", (socket) => {
     console.log(`🔌 User Connected: ${socket.id}`);
 
-    // Step A: Join the Room
     socket.on("join_room", (roomId) => {
         socket.join(roomId);
         console.log(`🏠 User ${socket.id} joined room: ${roomId}`);
-        
-        // IMPORTANT: Tell everyone else in the room "I am here!"
         socket.to(roomId).emit("user_joined", socket.id);
     });
 
-    // Step B: Relay the Offer (Broadcaster -> Viewer)
     socket.on("offer", (data) => {
-        console.log("📨 Relaying Offer to Room:", data.roomId);
         socket.to(data.roomId).emit("offer", data.offer);
     });
 
-    // Step C: Relay the Answer (Viewer -> Broadcaster)
     socket.on("answer", (data) => {
-        console.log("🤝 Relaying Answer to Room:", data.roomId);
         socket.to(data.roomId).emit("answer", data.answer);
     });
 
-    // Step D: Relay Internet Paths (ICE Candidates)
     socket.on("ice_candidate", (data) => {
         socket.to(data.roomId).emit("ice_candidate", data.candidate);
     });
