@@ -8,28 +8,28 @@ const Watch = () => {
     const videoRef = useRef();
     const [status, setStatus] = useState("SEARCHING FOR SIGNAL...");
     const [showPlayBtn, setShowPlayBtn] = useState(false);
-    
+
     useEffect(() => {
         const socket = io('https://ghost-backend-fq2h.onrender.com');
-        const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun1.l.google.com:19302' }] });
+        const pc = new RTCPeerConnection({
+            iceServers: [{ urls: 'stun:stun1.l.google.com:19302' }]
+        });
 
         socket.on('connect', () => {
             socket.emit("join_room", id);
             setStatus("CONNECTED. WAITING FOR VIDEO...");
         });
 
-        // Handle Stream
         pc.ontrack = (event) => {
             if (videoRef.current) {
                 videoRef.current.srcObject = event.streams[0];
-                videoRef.current.muted = true; // Auto-mute to allow play
+                videoRef.current.muted = true;
                 videoRef.current.play()
                     .then(() => setStatus("🔴 LIVE FEED"))
-                    .catch(() => setShowPlayBtn(true)); // Show button if blocked
+                    .catch(() => setShowPlayBtn(true));
             }
         };
 
-        // Signaling
         socket.on("offer", async (offer) => {
             await pc.setRemoteDescription(new RTCSessionDescription(offer));
             const answer = await pc.createAnswer();
@@ -40,9 +40,15 @@ const Watch = () => {
         pc.onicecandidate = (e) => {
             if (e.candidate) socket.emit("ice_candidate", { candidate: e.candidate, roomId: id });
         };
-        socket.on("ice_candidate", (c) => pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{}));
 
-        return () => { socket.disconnect(); pc.close(); };
+        socket.on("ice_candidate", (c) =>
+            pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {})
+        );
+
+        return () => {
+            socket.disconnect();
+            pc.close();
+        };
     }, [id]);
 
     const handlePlay = () => {
@@ -56,32 +62,101 @@ const Watch = () => {
 
     return (
         <div style={styles.page}>
-            <div style={styles.header}>GHOST EYE: MONITOR</div>
-            <div style={styles.subHeader}>ID: {id}</div>
+            <div style={styles.container}>
+                <div style={styles.header}>LIVE MONITOR</div>
+                <div style={styles.subHeader}>STREAM ID: {id}</div>
 
-            <div style={styles.videoBox}>
-                <video ref={videoRef} autoPlay playsInline muted style={styles.video} controls />
+                <div style={styles.videoWrapper}>
+                    <video
+                        ref={videoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        controls
+                        style={styles.video}
+                    />
+                </div>
+
+                <div style={styles.status}>{status}</div>
+
+                {showPlayBtn && (
+                    <button onClick={handlePlay} style={styles.playBtn}>
+                        🔊 TAP TO UNMUTE
+                    </button>
+                )}
             </div>
-
-            <div style={styles.status}>{status}</div>
-
-            {showPlayBtn && (
-                <button onClick={handlePlay} style={styles.playBtn}>
-                    🔊 TAP TO UNMUTE & PLAY
-                </button>
-            )}
         </div>
     );
 };
 
 const styles = {
-    page: { height: '100vh', background: '#000', color: '#00ff00', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: 'Courier New, monospace' },
-    header: { fontSize: '24px', fontWeight: 'bold', color: '#0088ff', textShadow: '0 0 10px #0088ff' },
-    subHeader: { fontSize: '10px', color: '#555', marginBottom: '20px' },
-    videoBox: { width: '100%', maxWidth: '600px', border: '1px solid #333', borderRadius: '5px', padding: '5px', background: '#111' },
-    video: { width: '100%', borderRadius: '5px', display: 'block' },
-    status: { marginTop: '15px', fontSize: '12px', color: '#fff' },
-    playBtn: { marginTop: '20px', padding: '15px 30px', background: '#0088ff', color: 'white', border: 'none', borderRadius: '5px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }
+    page: {
+        minHeight: '100vh',
+        background: '#0a0a0a',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        color: '#fff',
+        fontFamily: 'system-ui'
+    },
+
+    container: {
+        width: '100%',
+        maxWidth: '900px',
+        padding: '16px',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: '12px'
+    },
+
+    header: {
+        fontSize: '22px',
+        fontWeight: '700',
+        color: '#00aaff'
+    },
+
+    subHeader: {
+        fontSize: '11px',
+        opacity: 0.6
+    },
+
+    videoWrapper: {
+        width: '100%',
+        maxWidth: '720px',
+        background: '#000',
+        borderRadius: '16px',
+        overflow: 'hidden',
+        border: '2px solid #00aaff'
+    },
+
+    video: {
+        width: '100%',
+        height: 'auto',
+        display: 'block',
+        background: '#000'
+    },
+
+    status: {
+        fontSize: '14px',
+        fontWeight: '600',
+        color: '#00ff88',
+        marginTop: '4px'
+    },
+
+    playBtn: {
+        marginTop: '14px',
+        padding: '14px 28px',
+        background: '#00aaff',
+        color: '#fff',
+        border: 'none',
+        borderRadius: '12px',
+        fontSize: '16px',
+        fontWeight: '700',
+        cursor: 'pointer',
+        width: '100%',
+        maxWidth: '320px'
+    }
 };
 
 export default Watch;
