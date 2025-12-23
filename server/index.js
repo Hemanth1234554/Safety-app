@@ -1,71 +1,79 @@
 // File: server/index.js
 import express from 'express';
-import cors from 'cors';
 import http from 'http';
 import { Server } from 'socket.io';
+import cors from 'cors';
 import dotenv from 'dotenv';
-import connectDB from './config/db.js';
-import authRoutes from './routes/authRoutes.js';
-import alertRoutes from './routes/alertRoutes.js';
-import userRoutes from './routes/userRoutes.js';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import mongoose from 'mongoose';
+import alertRoutes from './routes/alertRoutes.js'; // Ensure path is correct
 
 dotenv.config();
-connectDB();
 
 const app = express();
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
-app.use(cors({ origin: '*', methods: ['GET', 'POST'] }));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
-app.use('/evidence', express.static(path.join(__dirname, 'evidence')));
+// 1. ALLOW VERCEL TO TALK TO SERVER (CORS)
+app.use(cors({
+    origin: "*", // Allow all connections (easiest for debugging)
+    methods: ["GET", "POST"],
+    credentials: true
+}));
+app.use(express.json());
 
+// Database Connection
+mongoose.connect(process.env.MONGO_URI)
+    .then(() => console.log("✅ MongoDB Connected"))
+    .catch(err => console.error("❌ MongoDB Error:", err));
+
+// Routes
+app.use('/api/alerts', alertRoutes);
+app.get('/', (req, res) => res.send('Ghost Eye Server is Running 👁️'));
+
+// 2. SETUP SOCKET SERVER
 const server = http.createServer(app);
+
 const io = new Server(server, {
-    cors: { origin: "*", methods: ["GET", "POST"] }
+    cors: {
+        origin: "*", // CRITICAL: Allow sockets from Vercel
+        methods: ["GET", "POST"]
+    }
 });
 
-// --- LOUD DEBUGGING LOGIC ---
+// 3. THE SIGNALING LOGIC (The "Operator")
 io.on("connection", (socket) => {
-    console.log(`⚡ NEW CONNECTION: ${socket.id}`);
+    console.log(`🔌 User Connected: ${socket.id}`);
 
+    // Step A: Join the Room
     socket.on("join_room", (roomId) => {
         socket.join(roomId);
-        console.log(`🚪 User ${socket.id} JOINED ROOM: ${roomId}`);
+        console.log(`🏠 User ${socket.id} joined room: ${roomId}`);
+        
+        // IMPORTANT: Tell everyone else in the room "I am here!"
+        socket.to(roomId).emit("user_joined", socket.id);
     });
 
+    // Step B: Relay the Offer (Broadcaster -> Viewer)
     socket.on("offer", (data) => {
-        console.log(`📤 OFFER received from ${socket.id} for ROOM ${data.roomId}`);
-        // Log if anyone else is in the room
-        const room = io.sockets.adapter.rooms.get(data.roomId);
-        console.log(`👥 People in room ${data.roomId}: ${room ? room.size : 0}`);
-        
+        console.log("📨 Relaying Offer to Room:", data.roomId);
         socket.to(data.roomId).emit("offer", data.offer);
     });
 
+    // Step C: Relay the Answer (Viewer -> Broadcaster)
     socket.on("answer", (data) => {
-        console.log(`📥 ANSWER received from ${socket.id} for ROOM ${data.roomId}`);
+        console.log("🤝 Relaying Answer to Room:", data.roomId);
         socket.to(data.roomId).emit("answer", data.answer);
     });
 
+    // Step D: Relay Internet Paths (ICE Candidates)
     socket.on("ice_candidate", (data) => {
-        console.log(`❄️ ICE Candidate from ${socket.id}`); 
         socket.to(data.roomId).emit("ice_candidate", data.candidate);
     });
 
     socket.on("disconnect", () => {
-        console.log(`❌ DISCONNECTED: ${socket.id}`);
+        console.log("❌ User Disconnected", socket.id);
     });
 });
 
-app.get('/', (req, res) => { res.send('GHOST PROTOCOL: Backend Online'); });
-
-app.use('/api/auth', authRoutes);
-app.use('/api/alerts', alertRoutes);
-app.use('/api/user', userRoutes);
-
-const PORT = process.env.PORT || 10000;
-server.listen(PORT, () => { console.log(`SERVER RUNNING ON PORT ${PORT}`); });
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+});
