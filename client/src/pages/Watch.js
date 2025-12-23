@@ -3,121 +3,112 @@ import React, { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import { useParams } from 'react-router-dom';
 
-const servers = {
-    iceServers: [
-        { urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] }
-    ]
-};
-
 const Watch = () => {
     const { id } = useParams();
     const videoRef = useRef();
-    const [status, setStatus] = useState("CONNECTING...");
-    const [debugInfo, setDebugInfo] = useState(""); // To see technical errors
-    const peerConnection = useRef(new RTCPeerConnection(servers));
-    const socketRef = useRef();
+    const [logs, setLogs] = useState(["Waiting for connection..."]);
+    const peerConnection = useRef(new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun1.l.google.com:19302' }]
+    }));
+
+    const addLog = (msg) => {
+        setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 8));
+        console.log(msg);
+    };
 
     useEffect(() => {
-        socketRef.current = io('https://ghost-backend-fq2h.onrender.com');
+        const socket = io('https://ghost-backend-fq2h.onrender.com');
 
-        // 1. SETUP VIDEO HANDLING
+        socket.on('connect', () => {
+            addLog(`✅ Server Connected`);
+            addLog(`🏠 Joining Room: ${id}`);
+            socket.emit("join_room", id);
+        });
+
+        // 1. Wait for Offer
+        socket.on("offer", async (offer) => {
+            addLog("📩 Offer Received! Processing...");
+            try {
+                await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
+                const answer = await peerConnection.current.createAnswer();
+                await peerConnection.current.setLocalDescription(answer);
+                
+                addLog("📤 Sending Answer...");
+                socket.emit("answer", { answer, roomId: id });
+            } catch (err) {
+                addLog(`❌ OFFER ERROR: ${err.message}`);
+            }
+        });
+
+        // 2. Handle Video Stream
         peerConnection.current.ontrack = (event) => {
-            console.log("📺 STREAM RECEIVED:", event.streams[0]);
-            setStatus("🔴 SIGNAL RECEIVED");
-            
+            addLog(`📺 Track Received: ${event.streams[0].id}`);
             if (videoRef.current) {
                 videoRef.current.srcObject = event.streams[0];
-                // CRITICAL: Mute first to bypass browser security
-                videoRef.current.muted = true; 
+                videoRef.current.muted = true; // FORCE MUTE
                 
-                // Force play promise
                 const playPromise = videoRef.current.play();
                 if (playPromise !== undefined) {
                     playPromise
-                        .then(() => setStatus("🟢 LIVE FEED ACTIVE"))
-                        .catch(error => {
-                            console.error("Auto-play blocked:", error);
-                            setStatus("⚠️ TAP BUTTON BELOW TO START");
-                        });
+                        .then(() => addLog("🟢 Playing (Muted)"))
+                        .catch(e => addLog(`⚠️ Autoplay Blocked: ${e.message}`));
                 }
             }
         };
 
-        // 2. MONITOR CONNECTION HEALTH
+        // 3. Monitor Connection Health
         peerConnection.current.oniceconnectionstatechange = () => {
-            setDebugInfo(`ICE State: ${peerConnection.current.iceConnectionState}`);
-            if (peerConnection.current.iceConnectionState === 'disconnected') {
-                setStatus("❌ BROADCASTER DISCONNECTED");
-            }
+            addLog(`📡 ICE State: ${peerConnection.current.iceConnectionState}`);
         };
 
-        // 3. SIGNALING
+        // 4. ICE Candidates
         peerConnection.current.onicecandidate = (event) => {
             if (event.candidate) {
-                socketRef.current.emit("ice_candidate", { candidate: event.candidate, roomId: id });
+                socket.emit("ice_candidate", { candidate: event.candidate, roomId: id });
             }
         };
-
-        socketRef.current.on('connect', () => {
-            setDebugInfo("Socket Connected. Joining Room...");
-            socketRef.current.emit("join_room", id);
-        });
-
-        socketRef.current.on("offer", async (offer) => {
-            setStatus("⚠️ HANDSHAKE RECEIVED...");
-            await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
-            const answer = await peerConnection.current.createAnswer();
-            await peerConnection.current.setLocalDescription(answer);
-            socketRef.current.emit("answer", { answer, roomId: id });
-        });
-
-        socketRef.current.on("ice_candidate", (candidate) => {
-            peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+        socket.on("ice_candidate", (candidate) => {
+            peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => {});
         });
 
         return () => {
-            socketRef.current.disconnect();
+            socket.disconnect();
             peerConnection.current.close();
         };
+        // eslint-disable-next-line
     }, [id]);
 
-    const handleForcePlay = () => {
-        if(videoRef.current) {
+    const handleUnmute = () => {
+        if (videoRef.current) {
             videoRef.current.muted = false;
             videoRef.current.play();
-            setStatus("🟢 LIVE FEED ACTIVE");
+            addLog("🔊 Unmuted Manually");
         }
     };
 
     return (
-        <div style={styles.container}>
-            <div style={styles.header}>GHOST EYE: MONITOR</div>
-            <div style={styles.status}>{status}</div>
-            <div style={{fontSize: '10px', color: '#555', marginBottom: '10px'}}>{debugInfo}</div>
-
-            <div style={styles.videoBox}>
-                <video 
-                    ref={videoRef} 
-                    autoPlay 
-                    playsInline 
-                    muted // ALWAYS START MUTED
-                    style={styles.video} 
-                />
+        <div style={styles.page}>
+            <div style={styles.header}>MONITOR DEBUG</div>
+            
+            {/* BLUE LOG BOX */}
+            <div style={styles.logBox}>
+                {logs.map((log, i) => <div key={i}>{log}</div>)}
             </div>
 
-            <button onClick={handleForcePlay} style={styles.forceBtn}>
-                🔊 TAP TO UNMUTE & PLAY
+            <video ref={videoRef} autoPlay playsInline muted style={styles.video} controls />
+            
+            <button onClick={handleUnmute} style={styles.forceBtn}>
+                🔊 TAP TO UNMUTE
             </button>
         </div>
     );
 };
 
 const styles = {
-    container: { height: '100vh', background: '#000', color: '#00ff00', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: 'monospace' },
-    header: { fontSize: '20px', fontWeight: 'bold', color: '#0088ff', marginBottom: '10px' },
-    status: { fontSize: '12px', color: '#fff', marginBottom: '5px', border: '1px solid #333', padding: '5px' },
-    videoBox: { padding: '5px', border: '1px solid #333', borderRadius: '5px', background: '#111', width: '90%', maxWidth: '600px' },
-    video: { width: '100%', borderRadius: '5px', background: '#000', minHeight: '200px', transform: 'scaleX(-1)' }, // Mirror effect
+    page: { height: '100vh', background: '#000', color: '#0f0', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px', fontFamily: 'monospace' },
+    header: { fontSize: '18px', fontWeight: 'bold', color: '#0088ff', marginBottom: '10px' },
+    logBox: { width: '100%', height: '150px', background: '#111', color: '#00ffff', fontSize: '11px', padding: '5px', overflowY: 'scroll', border: '1px solid #0088ff', marginBottom: '15px' },
+    video: { width: '100%', maxWidth: '400px', height: '300px', background: '#222', border: '1px solid #555' },
     forceBtn: { marginTop: '20px', padding: '15px 30px', background: '#0088ff', color: 'white', border: 'none', borderRadius: '5px', fontSize: '16px', fontWeight: 'bold' }
 };
 

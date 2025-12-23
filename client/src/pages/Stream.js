@@ -5,117 +5,128 @@ import { useNavigate } from 'react-router-dom';
 
 const Stream = () => {
     const userVideo = useRef();
-    const socketRef = useRef(); // To hold socket connection
-    const streamRef = useRef(); // To hold camera stream
-    const [status, setStatus] = useState("INITIALIZING EMERGENCY BROADCAST...");
+    const socketRef = useRef();
+    const streamRef = useRef();
+    const [logs, setLogs] = useState(["Waiting for SOS sequence..."]);
     const navigate = useNavigate();
+
+    // Helper to print logs on screen
+    const addLog = (msg) => {
+        setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 8));
+        console.log(msg);
+    };
 
     const userInfo = JSON.parse(localStorage.getItem("userInfo"));
     const userId = userInfo ? userInfo._id : "anonymous";
 
     useEffect(() => {
-        // 1. CONNECT TO SOCKET SERVER IMMEDIATELY
+        // 1. Connect to Server
         const socket = io('https://ghost-backend-fq2h.onrender.com');
         socketRef.current = socket;
 
-        // 2. START CAMERA IMMEDIATELY
+        socket.on('connect', () => {
+            addLog(`✅ Server Connected (Socket ID: ${socket.id})`);
+            addLog(`🏠 Joining Room: ${userId}`);
+            socket.emit("join_room", userId);
+        });
+
+        // 2. Start Camera
+        addLog("📷 Requesting Camera...");
         navigator.mediaDevices.getUserMedia({ video: true, audio: true })
             .then((stream) => {
+                addLog("✅ Camera Access Granted");
+                addLog(`tracks: ${stream.getTracks().length}`);
                 streamRef.current = stream;
                 if (userVideo.current) {
                     userVideo.current.srcObject = stream;
                 }
-                
-                // 3. JOIN ROOM AUTOMATICALLY
-                socket.emit("join_room", userId);
-                setStatus("🔴 LIVE - LINK SENT TO CONTACTS via EMAIL");
-
-                // 4. SETUP PEER CONNECTION LOGIC
-                socket.on("user_joined", (viewerId) => {
-                    setStatus("⚠️ CONTACT CONNECTED! STREAMING DATA...");
-                    startCall(socket, viewerId, stream);
-                });
             })
-            .catch((err) => {
-                console.error(err);
-                setStatus("❌ CAMERA ERROR: " + err.message);
-            });
+            .catch((err) => addLog(`❌ CAMERA FAIL: ${err.message}`));
 
-        // Cleanup: Stop everything if user leaves page
+        // 3. Listen for the Viewer (Person clicking email link)
+        socket.on("user_joined", (viewerId) => {
+            addLog(`👤 VIEWER JOINED! ID: ${viewerId}`);
+            addLog("🚀 Starting Handshake...");
+            startCall(socket, userId);
+        });
+
+        socket.on("answer", () => addLog("🤝 Answer Received - Connecting..."));
+        socket.on("ice_candidate", () => {}); // Silent log for candidates
+
         return () => {
-            stopStreaming();
+            if(streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+            socket.disconnect();
         };
         // eslint-disable-next-line
     }, []);
 
-    const startCall = async (socket, viewerId, stream) => {
-        const peerConnection = new RTCPeerConnection({
-            iceServers: [{ urls: 'stun:stun1.l.google.com:19302' }]
-        });
+    const startCall = async (socket, roomId) => {
+        try {
+            const peerConnection = new RTCPeerConnection({
+                iceServers: [{ urls: 'stun:stun1.l.google.com:19302' }]
+            });
 
-        stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+            // Add Video/Audio Tracks to Connection
+            const stream = streamRef.current;
+            stream.getTracks().forEach(track => {
+                peerConnection.addTrack(track, stream);
+                addLog(`📤 Added Track: ${track.kind}`);
+            });
 
-        peerConnection.onicecandidate = (event) => {
-            if (event.candidate) {
-                socket.emit("ice_candidate", { candidate: event.candidate, roomId: userId });
-            }
-        };
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit("ice_candidate", { candidate: event.candidate, roomId });
+                }
+            };
 
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        socket.emit("offer", { offer, roomId: userId });
+            peerConnection.oniceconnectionstatechange = () => {
+                addLog(`📡 Connection State: ${peerConnection.iceConnectionState}`);
+            };
 
-        socket.on("answer", (answer) => {
-            peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-        });
+            // Create Offer
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            
+            addLog("📨 Sending Offer to Viewer...");
+            socket.emit("offer", { offer, roomId });
 
-        socket.on("ice_candidate", (candidate) => {
-            peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-        });
-    };
+            socket.on("answer", (answer) => {
+                peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+            });
 
-    // --- STOP AND EXIT ---
-    const stopStreaming = () => {
-        if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop()); // Turn off camera light
+            socket.on("ice_candidate", (candidate) => {
+                peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+            });
+
+        } catch (err) {
+            addLog(`❌ ERROR: ${err.message}`);
         }
-        if (socketRef.current) {
-            socketRef.current.disconnect(); // Kill connection
-        }
-    };
-
-    const handleStopAndExit = () => {
-        stopStreaming();
-        navigate('/dashboard');
     };
 
     return (
         <div style={styles.page}>
-            <div style={styles.header}>🚨 EMERGENCY MODE 🚨</div>
-            <div style={styles.status}>{status}</div>
+            <div style={styles.header}>BROADCASTER DEBUG (SOS MODE)</div>
+            
+            {/* THE BLUE LOG BOX */}
+            <div style={styles.logBox}>
+                {logs.map((log, i) => <div key={i}>{log}</div>)}
+            </div>
             
             <video ref={userVideo} autoPlay playsInline muted style={styles.video} />
 
-            <div style={styles.controls}>
-                <p style={{color: '#ffcccc', fontSize: '12px', textAlign: 'center'}}>
-                    Your contacts have received a link to this stream.
-                    <br/>Keep this page open.
-                </p>
-                <button onClick={handleStopAndExit} style={styles.stopBtn}>
-                    ⏹️ STOP & I AM SAFE
-                </button>
-            </div>
+            <button onClick={() => navigate('/dashboard')} style={styles.stopBtn}>
+                ⏹️ STOP STREAMING
+            </button>
         </div>
     );
 };
 
 const styles = {
-    page: { height: '100vh', background: '#220000', color: '#ff4444', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '20px', fontFamily: 'monospace' },
-    header: { fontSize: '24px', fontWeight: 'bold', marginBottom: '10px', color: 'red', textShadow: '0 0 10px red' },
-    status: { fontSize: '14px', color: '#fff', marginBottom: '10px', textAlign: 'center' },
-    video: { width: '100%', maxWidth: '600px', borderRadius: '8px', border: '3px solid red', backgroundColor: '#000', height: '400px', objectFit: 'cover' },
-    controls: { marginTop: '20px', width: '100%', maxWidth: '400px', display: 'flex', flexDirection: 'column', gap: '15px', alignItems: 'center' },
-    stopBtn: { padding: '20px 40px', fontSize: '18px', background: 'red', color: 'white', border: '3px solid white', borderRadius: '50px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 0 15px red' }
+    page: { height: '100vh', background: '#220000', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px', fontFamily: 'monospace' },
+    header: { fontSize: '16px', fontWeight: 'bold', color: 'red', marginBottom: '10px' },
+    logBox: { width: '100%', height: '150px', background: '#000', color: '#00ffff', fontSize: '11px', padding: '5px', overflowY: 'scroll', border: '1px solid #00ffff', marginBottom: '15px' },
+    video: { width: '100%', maxWidth: '400px', height: '300px', background: '#000', border: '2px solid red', objectFit: 'cover' },
+    stopBtn: { marginTop: '20px', padding: '15px 30px', background: 'red', color: 'white', border: '3px solid white', borderRadius: '50px', fontWeight: 'bold' }
 };
 
 export default Stream;
