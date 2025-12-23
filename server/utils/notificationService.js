@@ -18,6 +18,8 @@ export const sendEmergencyNotifications = async (user, alertData) => {
 
     const lat = alertData.location.latitude;
     const lng = alertData.location.longitude;
+
+    // FIX: Use simple, standard Google Maps Link
     const mapLink = `https://www.google.com/maps?q=${lat},${lng}`;
 
     // 1. HANDLE AUDIO ATTACHMENT
