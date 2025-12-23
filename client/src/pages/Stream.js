@@ -7,115 +7,129 @@ const Stream = () => {
     const userVideo = useRef();
     const socketRef = useRef();
     const streamRef = useRef();
-    const [logs, setLogs] = useState(["Waiting for SOS sequence..."]);
+    const [status, setStatus] = useState("⚠️ INITIALIZING...");
+    const [logs, setLogs] = useState([]); // Start empty
     const navigate = useNavigate();
 
-    // Helper to print logs on screen
+    // Safer Log Function
     const addLog = (msg) => {
-        setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 8));
         console.log(msg);
+        setLogs(prev => [`${new Date().toLocaleTimeString().split(' ')[0]} ${msg}`, ...prev].slice(0, 10));
     };
 
-    const userInfo = JSON.parse(localStorage.getItem("userInfo"));
-    const userId = userInfo ? userInfo._id : "anonymous";
+    // 1. SAFE USER ID RETRIEVAL
+    let userId = "anonymous";
+    try {
+        const userInfo = JSON.parse(localStorage.getItem("userInfo"));
+        if (userInfo && userInfo._id) userId = userInfo._id;
+    } catch (e) {
+        console.error("User Parse Error");
+    }
 
     useEffect(() => {
-        // 1. Connect to Server
-        const socket = io('https://ghost-backend-fq2h.onrender.com');
-        socketRef.current = socket;
+        // Run immediately on mount
+        const init = async () => {
+            addLog(`🚀 APP STARTED. ID: ${userId}`);
 
-        socket.on('connect', () => {
-            addLog(`✅ Server Connected (Socket ID: ${socket.id})`);
-            addLog(`🏠 Joining Room: ${userId}`);
-            socket.emit("join_room", userId);
-        });
+            // 2. CONNECT SOCKET
+            try {
+                addLog("🔌 Connecting to Server...");
+                const socket = io('https://ghost-backend-fq2h.onrender.com');
+                socketRef.current = socket;
 
-        // 2. Start Camera
-        addLog("📷 Requesting Camera...");
-        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-            .then((stream) => {
-                addLog("✅ Camera Access Granted");
-                addLog(`tracks: ${stream.getTracks().length}`);
+                socket.on('connect', () => {
+                    setStatus("✅ SERVER CONNECTED");
+                    addLog(`✅ Connected! Socket ID: ${socket.id}`);
+                    addLog(`🏠 Joining Room: ${userId}`);
+                    socket.emit("join_room", userId);
+                });
+
+                socket.on("user_joined", (viewerId) => {
+                    setStatus("🔴 VIEWER JOINED - STARTING STREAM");
+                    addLog(`👤 Viewer Detected: ${viewerId}`);
+                    startCall(socket, userId);
+                });
+
+                socket.on("answer", () => addLog("🤝 Answer Received"));
+                
+            } catch (err) {
+                setStatus("❌ SOCKET ERROR");
+                addLog(`Socket Failed: ${err.message}`);
+            }
+
+            // 3. START CAMERA
+            try {
+                addLog("📷 Requesting Camera...");
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { width: 300, height: 300 }, // Low res for speed
+                    audio: true 
+                });
+                
+                addLog("✅ Camera Active");
                 streamRef.current = stream;
                 if (userVideo.current) {
                     userVideo.current.srcObject = stream;
                 }
-            })
-            .catch((err) => addLog(`❌ CAMERA FAIL: ${err.message}`));
+            } catch (err) {
+                setStatus("❌ CAMERA DENIED");
+                addLog(`Camera Failed: ${err.message}`);
+                alert("Please Allow Camera Permissions!");
+            }
+        };
 
-        // 3. Listen for the Viewer (Person clicking email link)
-        socket.on("user_joined", (viewerId) => {
-            addLog(`👤 VIEWER JOINED! ID: ${viewerId}`);
-            addLog("🚀 Starting Handshake...");
-            startCall(socket, userId);
-        });
-
-        socket.on("answer", () => addLog("🤝 Answer Received - Connecting..."));
-        socket.on("ice_candidate", () => {}); // Silent log for candidates
+        init();
 
         return () => {
-            if(streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-            socket.disconnect();
+            if(socketRef.current) socketRef.current.disconnect();
         };
         // eslint-disable-next-line
     }, []);
 
     const startCall = async (socket, roomId) => {
+        addLog("🚀 Starting P2P Handshake...");
         try {
-            const peerConnection = new RTCPeerConnection({
+            const pc = new RTCPeerConnection({
                 iceServers: [{ urls: 'stun:stun1.l.google.com:19302' }]
             });
 
-            // Add Video/Audio Tracks to Connection
             const stream = streamRef.current;
-            stream.getTracks().forEach(track => {
-                peerConnection.addTrack(track, stream);
-                addLog(`📤 Added Track: ${track.kind}`);
-            });
+            stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
-            peerConnection.onicecandidate = (event) => {
-                if (event.candidate) {
-                    socket.emit("ice_candidate", { candidate: event.candidate, roomId });
-                }
+            pc.onicecandidate = (e) => {
+                if (e.candidate) socket.emit("ice_candidate", { candidate: e.candidate, roomId });
             };
 
-            peerConnection.oniceconnectionstatechange = () => {
-                addLog(`📡 Connection State: ${peerConnection.iceConnectionState}`);
-            };
-
-            // Create Offer
-            const offer = await peerConnection.createOffer();
-            await peerConnection.setLocalDescription(offer);
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
             
-            addLog("📨 Sending Offer to Viewer...");
+            addLog("📤 Sending Offer...");
             socket.emit("offer", { offer, roomId });
 
-            socket.on("answer", (answer) => {
-                peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-            });
-
-            socket.on("ice_candidate", (candidate) => {
-                peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-            });
+            socket.on("answer", (ans) => pc.setRemoteDescription(new RTCSessionDescription(ans)));
+            socket.on("ice_candidate", (can) => pc.addIceCandidate(new RTCIceCandidate(can)));
 
         } catch (err) {
-            addLog(`❌ ERROR: ${err.message}`);
+            addLog(`❌ P2P Error: ${err.message}`);
         }
     };
 
     return (
         <div style={styles.page}>
-            <div style={styles.header}>BROADCASTER DEBUG (SOS MODE)</div>
+            <div style={styles.header}>BROADCASTER DEBUG</div>
+            <div style={{color: '#ffff00', fontSize: '12px', marginBottom: '5px'}}>
+                MY ID: {userId}
+            </div>
             
-            {/* THE BLUE LOG BOX */}
             <div style={styles.logBox}>
-                {logs.map((log, i) => <div key={i}>{log}</div>)}
+                {logs.length === 0 ? "Waiting for logs..." : logs.map((l, i) => <div key={i}>{l}</div>)}
             </div>
             
             <video ref={userVideo} autoPlay playsInline muted style={styles.video} />
 
+            <div style={styles.status}>{status}</div>
+
             <button onClick={() => navigate('/dashboard')} style={styles.stopBtn}>
-                ⏹️ STOP STREAMING
+                STOP
             </button>
         </div>
     );
@@ -123,10 +137,11 @@ const Stream = () => {
 
 const styles = {
     page: { height: '100vh', background: '#220000', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px', fontFamily: 'monospace' },
-    header: { fontSize: '16px', fontWeight: 'bold', color: 'red', marginBottom: '10px' },
-    logBox: { width: '100%', height: '150px', background: '#000', color: '#00ffff', fontSize: '11px', padding: '5px', overflowY: 'scroll', border: '1px solid #00ffff', marginBottom: '15px' },
-    video: { width: '100%', maxWidth: '400px', height: '300px', background: '#000', border: '2px solid red', objectFit: 'cover' },
-    stopBtn: { marginTop: '20px', padding: '15px 30px', background: 'red', color: 'white', border: '3px solid white', borderRadius: '50px', fontWeight: 'bold' }
+    header: { fontSize: '18px', fontWeight: 'bold', color: 'red', marginBottom: '5px' },
+    logBox: { width: '100%', height: '150px', background: '#000', color: '#00ff00', fontSize: '11px', padding: '5px', overflowY: 'scroll', border: '1px solid #555', marginBottom: '10px' },
+    video: { width: '200px', height: '200px', background: '#000', border: '2px solid red', objectFit: 'cover' },
+    status: { fontSize: '14px', marginTop: '10px', fontWeight: 'bold' },
+    stopBtn: { marginTop: '20px', padding: '10px 30px', background: 'red', color: 'white', border: 'none', borderRadius: '5px' }
 };
 
 export default Stream;
