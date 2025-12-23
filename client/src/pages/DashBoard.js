@@ -39,8 +39,7 @@ const Dashboard = () => {
         };
         checkLevel();
         battery.addEventListener('levelchange', checkLevel);
-        batteryListener = () =>
-          battery.removeEventListener('levelchange', checkLevel);
+        batteryListener = () => battery.removeEventListener('levelchange', checkLevel);
       }
     };
     monitorBattery();
@@ -58,7 +57,7 @@ const Dashboard = () => {
           mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
           mediaRecorder.onstop = () => {
             const blob = new Blob(audioChunks, { type: 'audio/webm' });
-            stream.getTracks().forEach(track => track.stop());
+            stream.getTracks().forEach(t => t.stop());
             resolve(blob);
           };
           mediaRecorder.start();
@@ -73,84 +72,67 @@ const Dashboard = () => {
     setLoading(true);
 
     let audioBlob = null;
-    if (alertType === 'PANIC_BUTTON' || alertType === 'SENTINEL_AI_TRIGGER') {
-      setStatus('🎙️ RECORDING EVIDENCE (5s)...');
+    if (alertType !== 'BATTERY_CRITICAL') {
+      setStatus('🎙️ RECORDING EVIDENCE...');
       audioBlob = await recordAudio();
     }
 
-    const sendToCloud = async (locData) => {
+    const sendToCloud = async (loc) => {
       try {
-        setStatus('☁️ TRANSMITTING DATA...');
-
+        setStatus('☁️ SENDING ALERT...');
         const formData = new FormData();
         formData.append('userId', userId);
         formData.append('type', alertType);
-        formData.append('latitude', locData.latitude);
-        formData.append('longitude', locData.longitude);
-        formData.append('address', locData.address || '');
+        formData.append('latitude', loc.latitude);
+        formData.append('longitude', loc.longitude);
+        formData.append('address', loc.address || '');
         formData.append('videoLink', watchLink);
-        if (audioBlob) formData.append('audio', audioBlob, 'evidence.webm');
+        if (audioBlob) formData.append('audio', audioBlob);
 
-        await axios.post(
-          'https://ghost-backend-fq2h.onrender.com/api/alerts',
-          formData,
-          { headers: { 'Content-Type': 'multipart/form-data' } }
-        );
-
-        setStatus('✅ ALERT SENT! STARTING CAMERA...');
-        setTimeout(() => navigate('/stream'), 1500);
+        await axios.post('https://ghost-backend-fq2h.onrender.com/api/alerts', formData);
+        setStatus('✅ ALERT SENT');
+        setTimeout(() => navigate('/stream'), 1200);
       } catch {
-        setStatus('❌ SERVER ERROR');
+        setStatus('❌ NETWORK ERROR');
         setLoading(false);
       }
     };
-
-    setStatus('🛰️ ACQUIRING GPS SATELLITES...');
-
-    if (!navigator.geolocation) {
-      sendToCloud({ latitude: 0, longitude: 0, address: 'GPS Not Supported' });
-      return;
-    }
 
     navigator.geolocation.getCurrentPosition(
       pos => sendToCloud({
         latitude: pos.coords.latitude,
         longitude: pos.coords.longitude,
-        address: 'GPS Lock Acquired'
+        address: 'GPS OK'
       }),
-      () => sendToCloud({ latitude: 0, longitude: 0, address: 'GPS Failed' }),
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      () => sendToCloud({ latitude: 0, longitude: 0, address: 'GPS FAILED' }),
+      { enableHighAccuracy: true, timeout: 15000 }
     );
   };
 
   return (
     <div style={styles.page}>
-      <div style={styles.card}>
+      <div style={styles.panel}>
         <div style={styles.header}>
-          <h2 style={styles.title}>SAFE ZONE</h2>
-          <p style={styles.protocol}>
-            GHOST PROTOCOL: <span style={{ color: '#32d74b' }}>ACTIVE</span>
-          </p>
-          <div style={styles.battery}>🔋 {batteryLevel}% BATTERY</div>
+          <h1 style={styles.title}>SAFE ZONE</h1>
+          <div style={styles.meta}>
+            <span>GHOST PROTOCOL: <b style={{ color: '#32d74b' }}>ACTIVE</b></span>
+            <span>🔋 {batteryLevel}%</span>
+          </div>
         </div>
 
-        <div style={styles.panicWrap}>
-          <button
-            style={styles.panicBtn}
-            onClick={() => handlePanic('PANIC_BUTTON')}
-            disabled={loading}
-          >
+        <div style={styles.sosWrap}>
+          <button style={styles.sosBtn} onClick={() => handlePanic()} disabled={loading}>
             {loading ? '...' : 'SOS'}
           </button>
         </div>
 
-        <div style={styles.statusBar}>STATUS: {status}</div>
+        <div style={styles.status}>STATUS: {status}</div>
 
-        <div style={styles.menu}>
-          <button style={styles.menuBtn} onClick={() => navigate('/fake-call')}>📱 FAKE CALL</button>
-          <button style={{ ...styles.menuBtn, background: '#003300' }} onClick={() => navigate('/stream')}>👁️ GHOST EYE</button>
-          <button style={{ ...styles.menuBtn, background: '#4a0000' }} onClick={() => navigate('/sentinel')}>🤖 SENTINEL AI</button>
-          <button style={{ ...styles.menuBtn, background: '#222' }} onClick={() => navigate('/settings')}>⚙️ SETTINGS</button>
+        <div style={styles.grid}>
+          <button style={styles.card} onClick={() => navigate('/fake-call')}>📱 Fake Call</button>
+          <button style={styles.card} onClick={() => navigate('/stream')}>👁️ Ghost Eye</button>
+          <button style={styles.card} onClick={() => navigate('/sentinel')}>🤖 Sentinel AI</button>
+          <button style={styles.card} onClick={() => navigate('/settings')}>⚙️ Settings</button>
         </div>
       </div>
     </div>
@@ -160,84 +142,76 @@ const Dashboard = () => {
 const styles = {
   page: {
     minHeight: '100vh',
-    background: '#0a0a0a',
+    background: 'radial-gradient(circle at top, #111, #000)',
     display: 'flex',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: '14px',
-    fontFamily: 'system-ui',
-    color: '#fff'
+    padding: '20px',
+    color: '#fff',
+    fontFamily: 'system-ui'
   },
 
-  card: {
+  panel: {
     width: '100%',
-    maxWidth: '420px',
-    background: '#111',
-    borderRadius: '20px',
-    padding: '18px',
-    boxShadow: '0 0 25px rgba(0,0,0,0.6)'
+    maxWidth: '720px',
+    background: '#0f0f0f',
+    borderRadius: '24px',
+    padding: '24px',
+    boxShadow: '0 30px 80px rgba(0,0,0,0.8)'
   },
 
-  header: {
-    textAlign: 'center',
-    marginBottom: '12px'
+  header: { textAlign: 'center', marginBottom: '20px' },
+  title: { margin: 0, letterSpacing: '2px' },
+
+  meta: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    fontSize: '13px',
+    opacity: 0.8,
+    marginTop: '6px'
   },
 
-  title: {
-    margin: 0,
-    letterSpacing: '1px'
-  },
-
-  protocol: {
-    fontSize: '12px',
-    opacity: 0.8
-  },
-
-  battery: {
-    fontSize: '12px',
-    opacity: 0.6
-  },
-
-  panicWrap: {
+  sosWrap: {
     display: 'flex',
     justifyContent: 'center',
-    margin: '18px 0'
+    margin: '30px 0'
   },
 
-  panicBtn: {
-    width: '180px',
-    height: '180px',
+  sosBtn: {
+    width: '220px',
+    height: '220px',
     borderRadius: '50%',
     background: '#ff2d2d',
-    color: '#fff',
-    fontSize: '34px',
-    fontWeight: '800',
     border: 'none',
-    boxShadow: '0 0 30px rgba(255,45,45,0.6)',
+    color: '#fff',
+    fontSize: '40px',
+    fontWeight: '900',
+    boxShadow: '0 0 60px rgba(255,45,45,0.7)',
     cursor: 'pointer'
   },
 
-  statusBar: {
+  status: {
     textAlign: 'center',
-    fontSize: '12px',
-    padding: '8px',
+    fontSize: '13px',
+    padding: '10px',
     background: '#000',
-    borderRadius: '10px',
-    marginBottom: '12px'
-  },
-
-  menu: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '10px'
-  },
-
-  menuBtn: {
-    padding: '12px',
     borderRadius: '12px',
-    border: 'none',
+    marginBottom: '24px'
+  },
+
+  grid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+    gap: '16px'
+  },
+
+  card: {
+    padding: '18px',
+    borderRadius: '16px',
     background: '#1a1a1a',
+    border: 'none',
     color: '#fff',
+    fontSize: '15px',
     fontWeight: '600',
     cursor: 'pointer'
   }
