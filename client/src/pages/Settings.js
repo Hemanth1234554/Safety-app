@@ -9,46 +9,51 @@ const Settings = () => {
   const [newType, setNewType] = useState('PHONE');
   const [msg, setMsg] = useState('');
 
-  // We get the user info from storage
   const userInfo = JSON.parse(localStorage.getItem('userInfo'));
 
-  // Load contacts when page opens
+  // LOAD CONTACTS
   useEffect(() => {
     if (userInfo) {
-      axios.get(`https://ghost-backend-fq2h.onrender.com/api/user/contacts/${userInfo._id}`)
+      // FIX 1: Changed 'user' to 'users'
+      axios.get(`https://ghost-backend-fq2h.onrender.com/api/users/contacts/${userInfo._id}`)
         .then(res => setContacts(res.data))
         .catch(err => console.log(err));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // <--- The warning is now silenced here
+  }, []);
 
+  // ADD CONTACT
   const handleAdd = async (e) => {
     e.preventDefault();
     try {
-      const { data } = await axios.post('https://ghost-backend-fq2h.onrender.com/api/user/contacts', {
+      // FIX 2: Changed 'user' to 'users'
+      const { data } = await axios.post('https://ghost-backend-fq2h.onrender.com/api/users/contacts', {
         userId: userInfo._id,
         name: newName,
         type: newType,
         value: newValue
       });
-      setContacts(data); // Update list
+      setContacts(data);
       setNewName(''); setNewValue('');
       setMsg('✅ CONTACT SECURED');
       setTimeout(() => setMsg(''), 3000);
     } catch (error) {
+      console.error(error); // Log the actual error to see details
       setMsg('❌ FAILED TO SAVE');
     }
   };
 
+  // DELETE CONTACT
   const handleDelete = async (contactId) => {
     try {
-      const { data } = await axios.post('hhttps://ghost-backend-fq2h.onrender.com/api/user/contacts/delete', {
+      // FIX 3: Fixed 'hhttps' typo and changed 'user' to 'users'
+      const { data } = await axios.post('https://ghost-backend-fq2h.onrender.com/api/users/contacts/delete', {
         userId: userInfo._id,
         contactId
       });
       setContacts(data);
     } catch (error) {
-      console.error("Delete failed");
+      console.error("Delete failed", error);
     }
   };
 
@@ -70,7 +75,7 @@ const Settings = () => {
         </div>
 
         <button type="submit" className="spy-btn btn-primary" style={{ padding: '10px' }}>ADD CONTACT</button>
-        {msg && <p style={{ color: '#0f0', marginTop: '10px' }}>{msg}</p>}
+        {msg && <p style={{ color: msg.includes('FAILED') ? 'red' : '#0f0', marginTop: '10px' }}>{msg}</p>}
       </form>
 
       {/* CONTACT LIST */}
@@ -92,4 +97,4 @@ const Settings = () => {
   );
 };
 
-export default Settings;  
+export default Settings;
