@@ -12,23 +12,18 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // 1. GENERATE THE WATCH LINK
   const userInfo = JSON.parse(localStorage.getItem('userInfo'));
   const userId = userInfo ? userInfo._id : 'unknown';
-  // This creates a link like: https://safety-app.vercel.app/watch/12345
   const watchLink = `${window.location.origin}/watch/${userId}`;
 
-  // --- SENTINEL AI TRIGGER LISTENER ---
   useEffect(() => {
     if (location.state && location.state.autoSOS) {
       handlePanic('SENTINEL_AI_TRIGGER');
-      // Clear the state so it doesn't loop
       window.history.replaceState({}, document.title);
     }
     // eslint-disable-next-line
   }, [location]);
 
-  // --- BATTERY MONITOR ---
   useEffect(() => {
     let batteryListener;
     const monitorBattery = async () => {
@@ -44,15 +39,15 @@ const Dashboard = () => {
         };
         checkLevel();
         battery.addEventListener('levelchange', checkLevel);
-        batteryListener = () => battery.removeEventListener('levelchange', checkLevel);
+        batteryListener = () =>
+          battery.removeEventListener('levelchange', checkLevel);
       }
     };
     monitorBattery();
-    return () => { if (batteryListener) batteryListener(); }
+    return () => batteryListener && batteryListener();
     // eslint-disable-next-line
   }, []);
 
-  // --- AUDIO RECORDER HELPER ---
   const recordAudio = () => {
     return new Promise((resolve) => {
       if (!navigator.mediaDevices) { resolve(null); return; }
@@ -60,32 +55,29 @@ const Dashboard = () => {
         .then(stream => {
           const mediaRecorder = new MediaRecorder(stream);
           const audioChunks = [];
-          mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
+          mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
           mediaRecorder.onstop = () => {
             const blob = new Blob(audioChunks, { type: 'audio/webm' });
-            stream.getTracks().forEach(track => track.stop()); // Stop mic
+            stream.getTracks().forEach(track => track.stop());
             resolve(blob);
           };
           mediaRecorder.start();
-          setTimeout(() => mediaRecorder.stop(), 5000); // Record for 5 seconds
+          setTimeout(() => mediaRecorder.stop(), 5000);
         })
         .catch(() => resolve(null));
     });
   };
 
-  // --- THE MAIN SOS FUNCTION ---
   const handlePanic = async (alertType = 'PANIC_BUTTON') => {
     setStatus('INITIALIZING EMERGENCY SEQUENCE...');
     setLoading(true);
 
-    // 1. Record Audio (5s)
     let audioBlob = null;
     if (alertType === 'PANIC_BUTTON' || alertType === 'SENTINEL_AI_TRIGGER') {
       setStatus('🎙️ RECORDING EVIDENCE (5s)...');
       audioBlob = await recordAudio();
     }
 
-    // 2. Define Send Function
     const sendToCloud = async (locData) => {
       try {
         setStatus('☁️ TRANSMITTING DATA...');
@@ -96,34 +88,23 @@ const Dashboard = () => {
         formData.append('latitude', locData.latitude);
         formData.append('longitude', locData.longitude);
         formData.append('address', locData.address || '');
-
-        // ** CRITICAL: SEND THE VIDEO LINK **
         formData.append('videoLink', watchLink);
+        if (audioBlob) formData.append('audio', audioBlob, 'evidence.webm');
 
-        if (audioBlob) {
-          formData.append('audio', audioBlob, 'evidence.webm');
-        }
-
-        // Send to Backend
-        await axios.post('https://ghost-backend-fq2h.onrender.com/api/alerts', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' }
-        });
+        await axios.post(
+          'https://ghost-backend-fq2h.onrender.com/api/alerts',
+          formData,
+          { headers: { 'Content-Type': 'multipart/form-data' } }
+        );
 
         setStatus('✅ ALERT SENT! STARTING CAMERA...');
-
-        // 3. AUTO-REDIRECT TO VIDEO STREAM
-        setTimeout(() => {
-          navigate('/stream');
-        }, 1500);
-
-      } catch (error) {
-        console.error(error);
-        setStatus('❌ SERVER ERROR (Check Internet)');
+        setTimeout(() => navigate('/stream'), 1500);
+      } catch {
+        setStatus('❌ SERVER ERROR');
         setLoading(false);
       }
     };
 
-    // 3. Get GPS
     setStatus('🛰️ ACQUIRING GPS SATELLITES...');
 
     if (!navigator.geolocation) {
@@ -132,52 +113,134 @@ const Dashboard = () => {
     }
 
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        // Success! We got real coordinates
-        sendToCloud({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          address: 'GPS Lock Acquired'
-        });
-      },
-      (error) => {
-        // Retry or Fail
-        console.warn("GPS High Accuracy Failed, trying low power...", error.message);
-        // Fallback: Try low accuracy if high fails
-        navigator.geolocation.getCurrentPosition(
-          (pos) => sendToCloud({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, address: 'Low Accuracy GPS' }),
-          () => sendToCloud({ latitude: 0, longitude: 0, address: 'GPS Signal Failed' })
-        );
-      },
-      // TIMEOUT: Wait up to 15 seconds for a lock (instead of giving up instantly)
+      pos => sendToCloud({
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+        address: 'GPS Lock Acquired'
+      }),
+      () => sendToCloud({ latitude: 0, longitude: 0, address: 'GPS Failed' }),
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   };
 
   return (
-    <div className="dashboard-container">
-      <div className="header-section">
-        <h2>Safe Zone</h2>
-        <p>GHOST PROTOCOL: <span style={{ color: '#32d74b' }}>ACTIVE</span></p>
-        <div style={{ marginTop: '10px', fontSize: '12px', color: '#666' }}>🔋 {batteryLevel}% BATTERY</div>
-      </div>
+    <div style={styles.page}>
+      <div style={styles.card}>
+        <div style={styles.header}>
+          <h2 style={styles.title}>SAFE ZONE</h2>
+          <p style={styles.protocol}>
+            GHOST PROTOCOL: <span style={{ color: '#32d74b' }}>ACTIVE</span>
+          </p>
+          <div style={styles.battery}>🔋 {batteryLevel}% BATTERY</div>
+        </div>
 
-      <div className="panic-container">
-        <button className="panic-btn" onClick={() => handlePanic('PANIC_BUTTON')} disabled={loading}>
-          {loading ? '...' : 'SOS'}
-        </button>
-      </div>
+        <div style={styles.panicWrap}>
+          <button
+            style={styles.panicBtn}
+            onClick={() => handlePanic('PANIC_BUTTON')}
+            disabled={loading}
+          >
+            {loading ? '...' : 'SOS'}
+          </button>
+        </div>
 
-      <div className="status-bar">STATUS: {status}</div>
+        <div style={styles.statusBar}>STATUS: {status}</div>
 
-      <div className="tactical-menu">
-        <button className="spy-btn" onClick={() => navigate('/fake-call')}><span>📱</span> FAKE CALL</button>
-        <button className="spy-btn" onClick={() => navigate('/stream')} style={{ background: '#004400' }}>👁️ GHOST EYE (MANUAL)</button>
-        <button className="spy-btn" onClick={() => navigate('/sentinel')} style={{ background: '#4a0000' }}>🤖 SENTINEL AI</button>
-        <button className="spy-btn danger" onClick={() => navigate('/settings')}><span>⚙️</span> SETTINGS</button>
+        <div style={styles.menu}>
+          <button style={styles.menuBtn} onClick={() => navigate('/fake-call')}>📱 FAKE CALL</button>
+          <button style={{ ...styles.menuBtn, background: '#003300' }} onClick={() => navigate('/stream')}>👁️ GHOST EYE</button>
+          <button style={{ ...styles.menuBtn, background: '#4a0000' }} onClick={() => navigate('/sentinel')}>🤖 SENTINEL AI</button>
+          <button style={{ ...styles.menuBtn, background: '#222' }} onClick={() => navigate('/settings')}>⚙️ SETTINGS</button>
+        </div>
       </div>
     </div>
   );
+};
+
+const styles = {
+  page: {
+    minHeight: '100vh',
+    background: '#0a0a0a',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: '14px',
+    fontFamily: 'system-ui',
+    color: '#fff'
+  },
+
+  card: {
+    width: '100%',
+    maxWidth: '420px',
+    background: '#111',
+    borderRadius: '20px',
+    padding: '18px',
+    boxShadow: '0 0 25px rgba(0,0,0,0.6)'
+  },
+
+  header: {
+    textAlign: 'center',
+    marginBottom: '12px'
+  },
+
+  title: {
+    margin: 0,
+    letterSpacing: '1px'
+  },
+
+  protocol: {
+    fontSize: '12px',
+    opacity: 0.8
+  },
+
+  battery: {
+    fontSize: '12px',
+    opacity: 0.6
+  },
+
+  panicWrap: {
+    display: 'flex',
+    justifyContent: 'center',
+    margin: '18px 0'
+  },
+
+  panicBtn: {
+    width: '180px',
+    height: '180px',
+    borderRadius: '50%',
+    background: '#ff2d2d',
+    color: '#fff',
+    fontSize: '34px',
+    fontWeight: '800',
+    border: 'none',
+    boxShadow: '0 0 30px rgba(255,45,45,0.6)',
+    cursor: 'pointer'
+  },
+
+  statusBar: {
+    textAlign: 'center',
+    fontSize: '12px',
+    padding: '8px',
+    background: '#000',
+    borderRadius: '10px',
+    marginBottom: '12px'
+  },
+
+  menu: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: '10px'
+  },
+
+  menuBtn: {
+    padding: '12px',
+    borderRadius: '12px',
+    border: 'none',
+    background: '#1a1a1a',
+    color: '#fff',
+    fontWeight: '600',
+    cursor: 'pointer'
+  }
 };
 
 export default Dashboard;
