@@ -8,105 +8,94 @@ const servers = {
         { urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] }
     ]
 };
-const Watch = () => {
-    const { id } = useParams();
-    const remoteVideoRef = useRef();
-    const peerConnection = useRef();
-    const socket = useRef();
-    const [status, setStatus] = useState("SEARCHING FOR SIGNAL...");
-    const [streamReady, setStreamReady] = useState(false); // NEW
 
+const Watch = () => {
+    const { id } = useParams(); // This is the UserID we are watching
+    const videoRef = useRef();
+    const [status, setStatus] = useState("CONNECTING TO SERVER...");
+    const socketRef = useRef();
 
     useEffect(() => {
-        socket.current = io('https://ghost-backend-fq2h.onrender.com');
-        socket.current.emit("join_room", id);
+        // 1. Connect to Server
+        const socket = io('https://ghost-backend-fq2h.onrender.com');
+        socketRef.current = socket;
 
-        // 1. Listen for Offer
-        socket.current.on("offer", async (offer) => {
-            console.log("RECEIVED OFFER");
-            setStatus("SIGNAL DETECTED - NEGOTIATING...");
-
-            if (peerConnection.current) peerConnection.current.close();
-            peerConnection.current = new RTCPeerConnection(servers);
-
-            // 2. Handle Incoming Stream (The Video)
-            peerConnection.current.ontrack = (event) => {
-                console.log("🎥 STREAM RECEIVED!", event.streams[0]);
-                if (remoteVideoRef.current) {
-                    remoteVideoRef.current.srcObject = event.streams[0];
-                    setStreamReady(true); // Enable the Play Button
-                    setStatus("🔴 LIVE FEED READY - CLICK PLAY");
-                }
-            };
-
-            // 3. Handle ICE Candidates
-            peerConnection.current.onicecandidate = (event) => {
-                if (event.candidate) {
-                    socket.current.emit("ice_candidate", {
-                        candidate: event.candidate,
-                        roomId: id
-                    });
-                }
-            };
-
-            await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
-            const answer = await peerConnection.current.createAnswer();
-            await peerConnection.current.setLocalDescription(answer);
-
-            socket.current.emit("answer", { answer, roomId: id });
+        socket.on('connect', () => {
+            setStatus("✅ SERVER CONNECTED. JOINING ROOM...");
+            // Emit join event immediately upon connection
+            socket.emit("join_room", id); 
         });
 
-        // 4. Listen for ICE Candidates
-        socket.current.on("ice_candidate", (candidate) => {
-            if (peerConnection.current) {
-                peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+        // 2. Setup WebRTC
+        const peerConnection = new RTCPeerConnection(servers);
+
+        peerConnection.ontrack = (event) => {
+            if (videoRef.current) {
+                videoRef.current.srcObject = event.streams[0];
+                setStatus("🔴 LIVE STREAM RECEIVED");
             }
+        };
+
+        peerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+                socket.emit("ice_candidate", { candidate: event.candidate, roomId: id });
+            }
+        };
+
+        // 3. Listen for Signals
+        socket.on("offer", async (offer) => {
+            setStatus("⚠️ CALL RECEIVED! ANSWERING...");
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            socket.emit("answer", { answer, roomId: id });
         });
 
-        return () => {
-            if (socket.current) socket.current.disconnect();
-            if (peerConnection.current) peerConnection.current.close();
-        };
+        socket.on("ice_candidate", (candidate) => {
+            peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        });
+
+        // Force a "Join" retry after 2 seconds just in case server was asleep
+        setTimeout(() => {
+            if (socket.connected) socket.emit("join_room", id);
+        }, 2000);
+
+        return () => socket.disconnect();
     }, [id]);
 
-    // NEW: Manual Play Function
-    const handlePlay = () => {
-        if (remoteVideoRef.current) {
-            remoteVideoRef.current.play()
-                .then(() => setStatus("🔴 WATCHING LIVE"))
-                .catch(e => console.error("Play Error:", e));
+    // Force Play is needed for browsers that block auto-video
+    const handleForcePlay = () => {
+        if(videoRef.current) {
+            videoRef.current.play();
+            setStatus("PLAYING...");
         }
     };
 
     return (
-        <div style={styles.page}>
+        <div style={styles.container}>
             <div style={styles.header}>GHOST EYE: MONITOR</div>
-            <div style={styles.status}>TARGET ID: {id}</div>
+            <div style={styles.subHeader}>TARGET ID: {id}</div>
             <div style={styles.status}>{status}</div>
 
-            <video
-                ref={remoteVideoRef}
-                playsInline
-                controls
-                style={styles.video}
-            />
+            <div style={styles.videoBox}>
+                <video ref={videoRef} autoPlay playsInline controls style={styles.video} />
+            </div>
 
-            {/* NEW: Only show this button when video is actually there */}
-            {streamReady && (
-                <button onClick={handlePlay} style={styles.playBtn}>
-                    ▶️ FORCE PLAY VIDEO
-                </button>
-            )}
+            <button onClick={handleForcePlay} style={styles.forceBtn}>
+                ▶️ CLICK IF VIDEO IS STUCK
+            </button>
         </div>
     );
 };
 
 const styles = {
-    page: { height: '100vh', background: '#111', color: '#0088ff', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '20px' },
-    header: { fontSize: '20px', fontWeight: 'bold', marginBottom: '10px', letterSpacing: '2px' },
-    status: { fontSize: '12px', color: '#888', marginBottom: '5px' },
-    video: { width: '100%', maxWidth: '600px', borderRadius: '4px', border: '1px solid #333', marginTop: '20px', backgroundColor: '#000', minHeight: '200px' },
-    playBtn: { marginTop: '20px', padding: '15px 40px', fontSize: '18px', background: '#0088ff', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }
+    container: { height: '100vh', background: '#000', color: '#00ff00', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: 'monospace' },
+    header: { fontSize: '24px', fontWeight: 'bold', color: '#0088ff', letterSpacing: '2px' },
+    subHeader: { fontSize: '12px', color: '#666', marginBottom: '20px' },
+    status: { fontSize: '14px', color: '#fff', marginBottom: '20px', border: '1px solid #333', padding: '5px 10px' },
+    videoBox: { padding: '10px', border: '1px solid #333', borderRadius: '10px', background: '#111' },
+    video: { width: '100%', maxWidth: '600px', borderRadius: '5px', maxHeight: '400px' },
+    forceBtn: { marginTop: '20px', padding: '10px 20px', background: '#333', color: '#fff', border: '1px solid #fff', cursor: 'pointer' }
 };
 
 export default Watch;

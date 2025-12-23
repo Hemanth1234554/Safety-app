@@ -18,13 +18,13 @@ export const sendEmergencyNotifications = async (user, alertData) => {
 
     const lat = alertData.location.latitude;
     const lng = alertData.location.longitude;
-    const mapLink = `http://googleusercontent.com/maps.google.com/maps?q=${lat},${lng}`;
+    const mapLink = `https://www.google.com/maps?q=${lat},${lng}`;
 
     // 1. HANDLE AUDIO ATTACHMENT
     let attachments = [];
     if (alertData.audioUrl) {
         try {
-            const filePath = `.${alertData.audioUrl}`; 
+            const filePath = `.${alertData.audioUrl}`;
             if (fs.existsSync(filePath)) {
                 attachments.push({
                     content: fs.readFileSync(filePath).toString("base64"),

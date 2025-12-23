@@ -8,7 +8,7 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(false);
   const [batteryLevel, setBatteryLevel] = useState(100);
   const alertSentRef = useRef(false);
-  
+
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -89,31 +89,31 @@ const Dashboard = () => {
     const sendToCloud = async (locData) => {
       try {
         setStatus('☁️ TRANSMITTING DATA...');
-        
+
         const formData = new FormData();
         formData.append('userId', userId);
         formData.append('type', alertType);
         formData.append('latitude', locData.latitude);
         formData.append('longitude', locData.longitude);
         formData.append('address', locData.address || '');
-        
+
         // ** CRITICAL: SEND THE VIDEO LINK **
-        formData.append('videoLink', watchLink); 
+        formData.append('videoLink', watchLink);
 
         if (audioBlob) {
-            formData.append('audio', audioBlob, 'evidence.webm');
+          formData.append('audio', audioBlob, 'evidence.webm');
         }
 
         // Send to Backend
         await axios.post('https://ghost-backend-fq2h.onrender.com/api/alerts', formData, {
-            headers: { 'Content-Type': 'multipart/form-data' }
+          headers: { 'Content-Type': 'multipart/form-data' }
         });
 
         setStatus('✅ ALERT SENT! STARTING CAMERA...');
-        
+
         // 3. AUTO-REDIRECT TO VIDEO STREAM
         setTimeout(() => {
-            navigate('/stream');
+          navigate('/stream');
         }, 1500);
 
       } catch (error) {
@@ -124,7 +124,8 @@ const Dashboard = () => {
     };
 
     // 3. Get GPS
-    setStatus('🛰️ ACQUIRING GPS...');
+    setStatus('🛰️ ACQUIRING GPS SATELLITES...');
+
     if (!navigator.geolocation) {
       sendToCloud({ latitude: 0, longitude: 0, address: 'GPS Not Supported' });
       return;
@@ -132,6 +133,7 @@ const Dashboard = () => {
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
+        // Success! We got real coordinates
         sendToCloud({
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
@@ -139,11 +141,16 @@ const Dashboard = () => {
         });
       },
       (error) => {
-        console.warn("GPS Failed:", error.message);
-        setStatus('⚠️ GPS FAILED. SENDING WITHOUT LOC...');
-        sendToCloud({ latitude: 0, longitude: 0, address: 'GPS Signal Failed' });
+        // Retry or Fail
+        console.warn("GPS High Accuracy Failed, trying low power...", error.message);
+        // Fallback: Try low accuracy if high fails
+        navigator.geolocation.getCurrentPosition(
+          (pos) => sendToCloud({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, address: 'Low Accuracy GPS' }),
+          () => sendToCloud({ latitude: 0, longitude: 0, address: 'GPS Signal Failed' })
+        );
       },
-      { enableHighAccuracy: true, timeout: 10000 }
+      // TIMEOUT: Wait up to 15 seconds for a lock (instead of giving up instantly)
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   };
 
