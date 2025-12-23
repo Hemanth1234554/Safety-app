@@ -1,16 +1,33 @@
 // File: client/src/pages/Dashboard.js
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 const Dashboard = () => {
   const [status, setStatus] = useState('SYSTEM STANDBY');
   const [loading, setLoading] = useState(false);
   const [batteryLevel, setBatteryLevel] = useState(100);
   const alertSentRef = useRef(false);
+  
   const navigate = useNavigate();
+  const location = useLocation();
 
-  // --- BATTERY SENTINEL ---
+  // 1. Generate the Watch Link (Universal)
+  const userInfo = JSON.parse(localStorage.getItem('userInfo'));
+  const userId = userInfo ? userInfo._id : 'unknown';
+  // This creates a link like: https://safety-app.vercel.app/watch/12345
+  const watchLink = `${window.location.origin}/watch/${userId}`;
+
+  // --- SENTINEL AI LISTENER ---
+  useEffect(() => {
+    if (location.state && location.state.autoSOS) {
+      handlePanic('SENTINEL_AI_TRIGGER');
+      window.history.replaceState({}, document.title);
+    }
+    // eslint-disable-next-line
+  }, [location]);
+
+  // --- BATTERY MONITOR ---
   useEffect(() => {
     let batteryListener;
     const monitorBattery = async () => {
@@ -34,11 +51,6 @@ const Dashboard = () => {
     // eslint-disable-next-line
   }, []);
 
-  const triggerFakeCall = () => {
-    // Go to the fake call page IMMEDIATELY (The delay happens there)
-    navigate('/fake-call');
-  };
-
   const recordAudio = () => {
     return new Promise((resolve) => {
       if (!navigator.mediaDevices) { resolve(null); return; }
@@ -49,10 +61,9 @@ const Dashboard = () => {
           mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
           mediaRecorder.onstop = () => {
             const blob = new Blob(audioChunks, { type: 'audio/webm' });
-            const reader = new FileReader();
-            reader.readAsDataURL(blob);
-            reader.onloadend = () => resolve(reader.result);
+            // Stop all tracks to release mic
             stream.getTracks().forEach(track => track.stop());
+            resolve(blob); // Return the raw blob
           };
           mediaRecorder.start();
           setTimeout(() => mediaRecorder.stop(), 5000);
@@ -61,52 +72,65 @@ const Dashboard = () => {
     });
   };
 
-  // --- THE NEW "FAIL-SAFE" PANIC HANDLER ---
   const handlePanic = async (alertType = 'PANIC_BUTTON') => {
     setStatus('INITIALIZING...');
     setLoading(true);
 
-    const userInfo = JSON.parse(localStorage.getItem('userInfo'));
-
-    // 1. Prepare Audio (Always try to record)
-    let audioBase64 = null;
-    if (alertType === 'PANIC_BUTTON') {
+    // 1. Record Audio Evidence (5s)
+    let audioBlob = null;
+    if (alertType === 'PANIC_BUTTON' || alertType === 'SENTINEL_AI_TRIGGER') {
       setStatus('RECORDING EVIDENCE (5s)...');
-      audioBase64 = await recordAudio();
+      audioBlob = await recordAudio();
     }
 
-    // 2. Define the Send Function (Reusable)
+    // 2. Define Send Function
     const sendToCloud = async (locData) => {
       try {
         setStatus('TRANSMITTING...');
-        await axios.post('https://ghost-backend-fq2h.onrender.com/api/alerts', {
-          userId: userInfo._id,
-          type: alertType,
-          location: locData,
-          audioData: audioBase64
+        
+        // Prepare FormData for file upload
+        const formData = new FormData();
+        formData.append('userId', userId);
+        formData.append('type', alertType);
+        formData.append('latitude', locData.latitude);
+        formData.append('longitude', locData.longitude);
+        formData.append('address', locData.address || '');
+        formData.append('videoLink', watchLink); // <--- SENDING VIDEO LINK HERE
+
+        if (audioBlob) {
+            // Append the actual file, not base64 string
+            formData.append('audio', audioBlob, 'evidence.webm');
+        }
+
+        // Send to Backend
+        await axios.post('https://ghost-backend-fq2h.onrender.com/api/alerts', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
         });
-        setStatus('✅ ALERT SENT SUCCESSFULLY');
+
+        setStatus('✅ ALERT SENT! STARTING CAMERA...');
+        
+        // 3. AUTO-START VIDEO STREAM
+        // Wait 1 second then jump to the camera page
+        setTimeout(() => {
+            navigate('/stream');
+        }, 1000);
+
       } catch (error) {
         console.error(error);
         setStatus('❌ SERVER ERROR (Check Internet)');
+        setLoading(false);
       }
-      setLoading(false);
     };
 
-    // 3. Try GPS with a Timeout
+    // 3. Get GPS
     setStatus('ACQUIRING GPS...');
-
     if (!navigator.geolocation) {
-      // No GPS? Send anyway!
       sendToCloud({ latitude: 0, longitude: 0, address: 'GPS Not Supported' });
       return;
     }
 
-    const gpsOptions = { enableHighAccuracy: true, timeout: 10000 }; // 10s limit
-
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        // Success!
         sendToCloud({
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
@@ -114,12 +138,11 @@ const Dashboard = () => {
         });
       },
       (error) => {
-        // Failed? Send anyway!
         console.warn("GPS Failed:", error.message);
         setStatus('⚠️ GPS FAILED. SENDING WITHOUT LOC...');
         sendToCloud({ latitude: 0, longitude: 0, address: 'GPS Signal Failed' });
       },
-      gpsOptions
+      { enableHighAccuracy: true, timeout: 10000 }
     );
   };
 
@@ -140,11 +163,10 @@ const Dashboard = () => {
       <div className="status-bar">STATUS: {status}</div>
 
       <div className="tactical-menu">
-        <button className="spy-btn" onClick={triggerFakeCall}><span>📱</span> TRIGGER FAKE CALL (5s)</button>
-        <button className="spy-btn danger" onClick={() => navigate('/settings')}><span>⚙️</span> SETTINGS & CONTACTS</button>
-        <button className="spy-btn" onClick={() => navigate('/stream')} style={{ marginTop: '10px', background: '#004400' }}>
-          👁️ GHOST EYE (LIVE)
-        </button>
+        <button className="spy-btn" onClick={() => navigate('/fake-call')}><span>📱</span> FAKE CALL</button>
+        <button className="spy-btn" onClick={() => navigate('/stream')} style={{ background: '#004400' }}>👁️ GHOST EYE (MANUAL)</button>
+        <button className="spy-btn" onClick={() => navigate('/sentinel')} style={{ background: '#4a0000' }}>🤖 SENTINEL AI</button>
+        <button className="spy-btn danger" onClick={() => navigate('/settings')}><span>⚙️</span> SETTINGS</button>
       </div>
     </div>
   );

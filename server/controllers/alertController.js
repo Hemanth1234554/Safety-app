@@ -12,26 +12,23 @@ const __dirname = path.dirname(__filename);
 
 export const createAlert = async (req, res) => {
     try {
-        const { userId, type, location, audioData } = req.body;
+        // 1. EXTRACT videoLink HERE
+        const { userId, type, location, audioData, videoLink } = req.body;
 
         const user = await User.findById(userId);
         if (!user) return res.status(404).json({ message: "User not found" });
 
         let audioUrl = null;
 
-        // --- THE FIX: CREATE FOLDER IF MISSING ---
+        // --- AUDIO SAVING LOGIC ---
         if (audioData) {
             const base64Data = audioData.replace(/^data:audio\/webm;base64,/, "");
             
-            // 1. Define the folder path
             const evidenceDir = path.join(__dirname, '../evidence');
-
-            // 2. Check and Create Directory recursively
             if (!fs.existsSync(evidenceDir)) {
                 fs.mkdirSync(evidenceDir, { recursive: true });
             }
 
-            // 3. Define file path and Save
             const fileName = `evidence-${userId}-${Date.now()}.webm`;
             const filePath = path.join(evidenceDir, fileName);
 
@@ -41,6 +38,9 @@ export const createAlert = async (req, res) => {
             console.log(`🎙️ AUDIO EVIDENCE SAVED: ${fileName}`);
         }
 
+        // Create the Alert in DB
+        // (If your Schema doesn't have videoLink yet, it simply won't save to DB, 
+        // but we still pass it to the email below)
         const newAlert = new Alert({
             user: userId,
             type,
@@ -50,15 +50,20 @@ export const createAlert = async (req, res) => {
 
         await newAlert.save();
 
-        // Send Email (Don't await this, let it run in background so UI is fast)
-        sendEmergencyNotifications(user, { ...newAlert.toObject(), audioUrl }).catch(err => 
+        // 2. PASS videoLink TO EMAIL SERVICE
+        // We explicitly add videoLink to the data object
+        sendEmergencyNotifications(user, { 
+            ...newAlert.toObject(), 
+            audioUrl, 
+            videoLink 
+        }).catch(err => 
             console.error("Background Email Error:", err)
         );
 
         res.status(201).json(newAlert);
 
     } catch (error) {
-        console.error("Alert Error:", error); // This is where you saw the error!
+        console.error("Alert Error:", error);
         res.status(500).json({ message: "Server Error", error: error.message });
     }
 };
