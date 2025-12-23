@@ -11,23 +11,22 @@ const __dirname = path.dirname(__filename);
 
 export const createAlert = async (req, res) => {
     try {
-        // 1. EXTRACT videoLink HERE
-        // We added 'videoLink' to the list of things we expect from the frontend
-        const { userId, type, location, audioData, videoLink } = req.body;
+        console.log("🚨 Received Alert Request");
+        console.log("Body:", req.body);
+        console.log("File:", req.file ? "Audio Attached" : "No Audio");
+
+        // 1. EXTRACT DATA (Now handled by Multer)
+        const { userId, type, latitude, longitude, address, videoLink } = req.body;
 
         const user = await User.findById(userId);
         if (!user) return res.status(404).json({ message: "User not found" });
 
         let audioUrl = null;
 
-        // --- AUDIO SAVING LOGIC ---
-        if (audioData) {
-            // Remove the "data:audio/webm;base64," prefix to get raw data
-            const base64Data = audioData.replace(/^data:audio\/webm;base64,/, "");
-            
+        // 2. HANDLE AUDIO FILE (From req.file, NOT req.body)
+        if (req.file) {
             const evidenceDir = path.join(__dirname, '../evidence');
             
-            // Create folder if it doesn't exist
             if (!fs.existsSync(evidenceDir)) {
                 fs.mkdirSync(evidenceDir, { recursive: true });
             }
@@ -35,28 +34,32 @@ export const createAlert = async (req, res) => {
             const fileName = `evidence-${userId}-${Date.now()}.webm`;
             const filePath = path.join(evidenceDir, fileName);
 
-            // Write the file to disk
-            fs.writeFileSync(filePath, base64Data, 'base64');
+            // Write the buffer directly to disk
+            fs.writeFileSync(filePath, req.file.buffer);
             
             audioUrl = `/evidence/${fileName}`;
             console.log(`🎙️ AUDIO EVIDENCE SAVED: ${fileName}`);
         }
 
+        // 3. Create Alert
         const newAlert = new Alert({
             user: userId,
             type,
-            location,
+            location: {
+                latitude: latitude || 0,
+                longitude: longitude || 0,
+                address: address || ''
+            },
             audioUrl
         });
 
         await newAlert.save();
 
-        // 2. PASS videoLink TO EMAIL SERVICE
-        // We package everything up (including the new videoLink) to send to the emailer
+        // 4. Send Email
         const emailPayload = { 
             ...newAlert.toObject(), 
             audioUrl, 
-            videoLink // <--- IMPORTANT: Passing this to the next step
+            videoLink 
         };
 
         sendEmergencyNotifications(user, emailPayload).catch(err => 
@@ -68,14 +71,5 @@ export const createAlert = async (req, res) => {
     } catch (error) {
         console.error("Alert Error:", error);
         res.status(500).json({ message: "Server Error", error: error.message });
-    }
-};
-
-export const getAlerts = async (req, res) => {
-    try {
-        const alerts = await Alert.find({ user: req.user.id }).sort({ createdAt: -1 });
-        res.json(alerts);
-    } catch (error) {
-        res.status(500).json({ message: "Server Error" });
     }
 };
