@@ -6,110 +6,82 @@ import { useParams } from 'react-router-dom';
 const Watch = () => {
     const { id } = useParams();
     const videoRef = useRef();
-    const [logs, setLogs] = useState(["Waiting for connection..."]);
-    const peerConnection = useRef(new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun1.l.google.com:19302' }]
-    }));
-
-    const addLog = (msg) => {
-        setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 8));
-        console.log(msg);
-    };
-
+    const [status, setStatus] = useState("SEARCHING FOR SIGNAL...");
+    const [showPlayBtn, setShowPlayBtn] = useState(false);
+    
     useEffect(() => {
         const socket = io('https://ghost-backend-fq2h.onrender.com');
+        const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun1.l.google.com:19302' }] });
 
         socket.on('connect', () => {
-            addLog(`✅ Server Connected`);
-            addLog(`🏠 Joining Room: ${id}`);
             socket.emit("join_room", id);
+            setStatus("CONNECTED. WAITING FOR VIDEO...");
         });
 
-        // 1. Wait for Offer
-        socket.on("offer", async (offer) => {
-            addLog("📩 Offer Received! Processing...");
-            try {
-                await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
-                const answer = await peerConnection.current.createAnswer();
-                await peerConnection.current.setLocalDescription(answer);
-                
-                addLog("📤 Sending Answer...");
-                socket.emit("answer", { answer, roomId: id });
-            } catch (err) {
-                addLog(`❌ OFFER ERROR: ${err.message}`);
-            }
-        });
-
-        // 2. Handle Video Stream
-        peerConnection.current.ontrack = (event) => {
-            addLog(`📺 Track Received: ${event.streams[0].id}`);
+        // Handle Stream
+        pc.ontrack = (event) => {
             if (videoRef.current) {
                 videoRef.current.srcObject = event.streams[0];
-                videoRef.current.muted = true; // FORCE MUTE
-                
-                const playPromise = videoRef.current.play();
-                if (playPromise !== undefined) {
-                    playPromise
-                        .then(() => addLog("🟢 Playing (Muted)"))
-                        .catch(e => addLog(`⚠️ Autoplay Blocked: ${e.message}`));
-                }
+                videoRef.current.muted = true; // Auto-mute to allow play
+                videoRef.current.play()
+                    .then(() => setStatus("🔴 LIVE FEED"))
+                    .catch(() => setShowPlayBtn(true)); // Show button if blocked
             }
         };
 
-        // 3. Monitor Connection Health
-        peerConnection.current.oniceconnectionstatechange = () => {
-            addLog(`📡 ICE State: ${peerConnection.current.iceConnectionState}`);
-        };
-
-        // 4. ICE Candidates
-        peerConnection.current.onicecandidate = (event) => {
-            if (event.candidate) {
-                socket.emit("ice_candidate", { candidate: event.candidate, roomId: id });
-            }
-        };
-        socket.on("ice_candidate", (candidate) => {
-            peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => {});
+        // Signaling
+        socket.on("offer", async (offer) => {
+            await pc.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            socket.emit("answer", { answer, roomId: id });
         });
 
-        return () => {
-            socket.disconnect();
-            peerConnection.current.close();
+        pc.onicecandidate = (e) => {
+            if (e.candidate) socket.emit("ice_candidate", { candidate: e.candidate, roomId: id });
         };
-        // eslint-disable-next-line
+        socket.on("ice_candidate", (c) => pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{}));
+
+        return () => { socket.disconnect(); pc.close(); };
     }, [id]);
 
-    const handleUnmute = () => {
+    const handlePlay = () => {
         if (videoRef.current) {
             videoRef.current.muted = false;
             videoRef.current.play();
-            addLog("🔊 Unmuted Manually");
+            setShowPlayBtn(false);
+            setStatus("🟢 LIVE AUDIO & VIDEO");
         }
     };
 
     return (
         <div style={styles.page}>
-            <div style={styles.header}>MONITOR DEBUG</div>
-            
-            {/* BLUE LOG BOX */}
-            <div style={styles.logBox}>
-                {logs.map((log, i) => <div key={i}>{log}</div>)}
+            <div style={styles.header}>GHOST EYE: MONITOR</div>
+            <div style={styles.subHeader}>ID: {id}</div>
+
+            <div style={styles.videoBox}>
+                <video ref={videoRef} autoPlay playsInline muted style={styles.video} controls />
             </div>
 
-            <video ref={videoRef} autoPlay playsInline muted style={styles.video} controls />
-            
-            <button onClick={handleUnmute} style={styles.forceBtn}>
-                🔊 TAP TO UNMUTE
-            </button>
+            <div style={styles.status}>{status}</div>
+
+            {showPlayBtn && (
+                <button onClick={handlePlay} style={styles.playBtn}>
+                    🔊 TAP TO UNMUTE & PLAY
+                </button>
+            )}
         </div>
     );
 };
 
 const styles = {
-    page: { height: '100vh', background: '#000', color: '#0f0', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px', fontFamily: 'monospace' },
-    header: { fontSize: '18px', fontWeight: 'bold', color: '#0088ff', marginBottom: '10px' },
-    logBox: { width: '100%', height: '150px', background: '#111', color: '#00ffff', fontSize: '11px', padding: '5px', overflowY: 'scroll', border: '1px solid #0088ff', marginBottom: '15px' },
-    video: { width: '100%', maxWidth: '400px', height: '300px', background: '#222', border: '1px solid #555' },
-    forceBtn: { marginTop: '20px', padding: '15px 30px', background: '#0088ff', color: 'white', border: 'none', borderRadius: '5px', fontSize: '16px', fontWeight: 'bold' }
+    page: { height: '100vh', background: '#000', color: '#00ff00', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: 'Courier New, monospace' },
+    header: { fontSize: '24px', fontWeight: 'bold', color: '#0088ff', textShadow: '0 0 10px #0088ff' },
+    subHeader: { fontSize: '10px', color: '#555', marginBottom: '20px' },
+    videoBox: { width: '100%', maxWidth: '600px', border: '1px solid #333', borderRadius: '5px', padding: '5px', background: '#111' },
+    video: { width: '100%', borderRadius: '5px', display: 'block' },
+    status: { marginTop: '15px', fontSize: '12px', color: '#fff' },
+    playBtn: { marginTop: '20px', padding: '15px 30px', background: '#0088ff', color: 'white', border: 'none', borderRadius: '5px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }
 };
 
 export default Watch;
