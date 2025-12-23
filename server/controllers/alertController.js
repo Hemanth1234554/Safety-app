@@ -6,13 +6,13 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-// Helper to get directory name in ES Modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const createAlert = async (req, res) => {
     try {
         // 1. EXTRACT videoLink HERE
+        // We added 'videoLink' to the list of things we expect from the frontend
         const { userId, type, location, audioData, videoLink } = req.body;
 
         const user = await User.findById(userId);
@@ -22,9 +22,12 @@ export const createAlert = async (req, res) => {
 
         // --- AUDIO SAVING LOGIC ---
         if (audioData) {
+            // Remove the "data:audio/webm;base64," prefix to get raw data
             const base64Data = audioData.replace(/^data:audio\/webm;base64,/, "");
             
             const evidenceDir = path.join(__dirname, '../evidence');
+            
+            // Create folder if it doesn't exist
             if (!fs.existsSync(evidenceDir)) {
                 fs.mkdirSync(evidenceDir, { recursive: true });
             }
@@ -32,15 +35,13 @@ export const createAlert = async (req, res) => {
             const fileName = `evidence-${userId}-${Date.now()}.webm`;
             const filePath = path.join(evidenceDir, fileName);
 
+            // Write the file to disk
             fs.writeFileSync(filePath, base64Data, 'base64');
             
             audioUrl = `/evidence/${fileName}`;
             console.log(`🎙️ AUDIO EVIDENCE SAVED: ${fileName}`);
         }
 
-        // Create the Alert in DB
-        // (If your Schema doesn't have videoLink yet, it simply won't save to DB, 
-        // but we still pass it to the email below)
         const newAlert = new Alert({
             user: userId,
             type,
@@ -51,12 +52,14 @@ export const createAlert = async (req, res) => {
         await newAlert.save();
 
         // 2. PASS videoLink TO EMAIL SERVICE
-        // We explicitly add videoLink to the data object
-        sendEmergencyNotifications(user, { 
+        // We package everything up (including the new videoLink) to send to the emailer
+        const emailPayload = { 
             ...newAlert.toObject(), 
             audioUrl, 
-            videoLink 
-        }).catch(err => 
+            videoLink // <--- IMPORTANT: Passing this to the next step
+        };
+
+        sendEmergencyNotifications(user, emailPayload).catch(err => 
             console.error("Background Email Error:", err)
         );
 
