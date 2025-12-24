@@ -2,28 +2,35 @@
 import mongoose from 'mongoose';
 
 const alertSchema = new mongoose.Schema({
-    user: { 
-        type: mongoose.Schema.Types.ObjectId, 
-        ref: 'User', 
-        required: true 
+    user: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true
+    },
+    type: {
+        type: String,
+        // <--- WE ADDED 'SENTINEL_AI_TRIGGER' HERE
+        enum: ['PANIC_BUTTON', 'BATTERY_CRITICAL', 'SENTINEL_AI_TRIGGER', 'FAKE_CALL'], 
+        default: 'PANIC_BUTTON'
     },
     location: {
-        latitude: Number,
-        longitude: Number,
-        address: String
+        latitude: { type: Number, required: true },
+        longitude: { type: Number, required: true },
+        address: { type: String } // Optional address
     },
-    audioUrl: { type: String },
-    type: { 
-        type: String, 
-        // ADD 'BATTERY_CRITICAL' TO THIS LIST:
-        enum: ['PANIC_BUTTON', 'DEAD_MAN_SWITCH', 'VOICE_TRIGGER', 'PANIC_BUTTON_SILENT', 'BATTERY_CRITICAL'], 
-        default: 'PANIC_BUTTON' 
+    audioUrl: {
+        type: String // URL to the audio evidence
     },
     status: {
         type: String,
-        enum: ['ACTIVE', 'RESOLVED', 'FALSE_ALARM'],
+        enum: ['ACTIVE', 'RESOLVED'],
         default: 'ACTIVE'
+    },
+    createdAt: {
+        type: Date,
+        default: Date.now
     }
-}, { timestamps: true });
+});
 
-export default mongoose.model('Alert', alertSchema);
+const Alert = mongoose.model('Alert', alertSchema);
+export default Alert;
