@@ -8,21 +8,19 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(false);
   const [batteryLevel, setBatteryLevel] = useState(100);
   const alertSentRef = useRef(false);
-
+  
   const navigate = useNavigate();
   const location = useLocation();
 
-  // 1. GENERATE THE WATCH LINK
   const userInfo = JSON.parse(localStorage.getItem('userInfo'));
   const userId = userInfo ? userInfo._id : 'unknown';
-  // This creates a link like: https://safety-app.vercel.app/watch/12345
   const watchLink = `${window.location.origin}/watch/${userId}`;
 
   // --- SENTINEL AI TRIGGER LISTENER ---
   useEffect(() => {
     if (location.state && location.state.autoSOS) {
-      handlePanic('SENTINEL_AI_TRIGGER');
-      // Clear the state so it doesn't loop
+      // Pass the pre-fetched location to the handler
+      handlePanic('SENTINEL_AI_TRIGGER', location.state.preLocation);
       window.history.replaceState({}, document.title);
     }
     // eslint-disable-next-line
@@ -52,7 +50,6 @@ const Dashboard = () => {
     // eslint-disable-next-line
   }, []);
 
-  // --- AUDIO RECORDER HELPER ---
   const recordAudio = () => {
     return new Promise((resolve) => {
       if (!navigator.mediaDevices) { resolve(null); return; }
@@ -63,57 +60,51 @@ const Dashboard = () => {
           mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
           mediaRecorder.onstop = () => {
             const blob = new Blob(audioChunks, { type: 'audio/webm' });
-            stream.getTracks().forEach(track => track.stop()); // Stop mic
+            stream.getTracks().forEach(track => track.stop());
             resolve(blob);
           };
           mediaRecorder.start();
-          setTimeout(() => mediaRecorder.stop(), 5000); // Record for 5 seconds
+          setTimeout(() => mediaRecorder.stop(), 5000);
         })
         .catch(() => resolve(null));
     });
   };
 
-  // --- THE MAIN SOS FUNCTION ---
-  const handlePanic = async (alertType = 'PANIC_BUTTON') => {
+  // --- MODIFIED SOS FUNCTION ---
+  // Now accepts 'preLocation' as a second argument
+  const handlePanic = async (alertType = 'PANIC_BUTTON', preLocation = null) => {
     setStatus('INITIALIZING EMERGENCY SEQUENCE...');
     setLoading(true);
 
-    // 1. Record Audio (5s)
     let audioBlob = null;
     if (alertType === 'PANIC_BUTTON' || alertType === 'SENTINEL_AI_TRIGGER') {
       setStatus('🎙️ RECORDING EVIDENCE (5s)...');
       audioBlob = await recordAudio();
     }
 
-    // 2. Define Send Function
     const sendToCloud = async (locData) => {
       try {
         setStatus('☁️ TRANSMITTING DATA...');
-
+        
         const formData = new FormData();
         formData.append('userId', userId);
         formData.append('type', alertType);
         formData.append('latitude', locData.latitude);
         formData.append('longitude', locData.longitude);
         formData.append('address', locData.address || '');
-
-        // ** CRITICAL: SEND THE VIDEO LINK **
-        formData.append('videoLink', watchLink);
+        formData.append('videoLink', watchLink); 
 
         if (audioBlob) {
-          formData.append('audio', audioBlob, 'evidence.webm');
+            formData.append('audio', audioBlob, 'evidence.webm');
         }
 
-        // Send to Backend
         await axios.post('https://ghost-backend-fq2h.onrender.com/api/alerts', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' }
+            headers: { 'Content-Type': 'multipart/form-data' }
         });
 
         setStatus('✅ ALERT SENT! STARTING CAMERA...');
-
-        // 3. AUTO-REDIRECT TO VIDEO STREAM
         setTimeout(() => {
-          navigate('/stream');
+            navigate('/stream');
         }, 1500);
 
       } catch (error) {
@@ -123,9 +114,20 @@ const Dashboard = () => {
       }
     };
 
-    // 3. Get GPS
-    setStatus('🛰️ ACQUIRING GPS SATELLITES...');
+    // --- NEW GPS LOGIC ---
+    // If we already have location from Sentinel, USE IT!
+    if (preLocation && preLocation.latitude !== 0) {
+        console.log("Using Pre-Fetched GPS:", preLocation);
+        sendToCloud({
+            latitude: preLocation.latitude,
+            longitude: preLocation.longitude,
+            address: 'AI Auto-Lock'
+        });
+        return;
+    }
 
+    // Otherwise, try to get it normally
+    setStatus('🛰️ ACQUIRING GPS...');
     if (!navigator.geolocation) {
       sendToCloud({ latitude: 0, longitude: 0, address: 'GPS Not Supported' });
       return;
@@ -133,7 +135,6 @@ const Dashboard = () => {
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        // Success! We got real coordinates
         sendToCloud({
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
@@ -141,16 +142,10 @@ const Dashboard = () => {
         });
       },
       (error) => {
-        // Retry or Fail
-        console.warn("GPS High Accuracy Failed, trying low power...", error.message);
-        // Fallback: Try low accuracy if high fails
-        navigator.geolocation.getCurrentPosition(
-          (pos) => sendToCloud({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, address: 'Low Accuracy GPS' }),
-          () => sendToCloud({ latitude: 0, longitude: 0, address: 'GPS Signal Failed' })
-        );
+        console.warn("GPS Failed:", error.message);
+        sendToCloud({ latitude: 0, longitude: 0, address: 'GPS Signal Failed' });
       },
-      // TIMEOUT: Wait up to 15 seconds for a lock (instead of giving up instantly)
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 10000 }
     );
   };
 
