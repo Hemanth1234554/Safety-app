@@ -9,17 +9,22 @@ const alertSchema = new mongoose.Schema({
     },
     type: {
         type: String,
-        // <--- WE ADDED 'SENTINEL_AI_TRIGGER' HERE
+        // ✅ CORRECT: This list allows the Sentinel AI to work
         enum: ['PANIC_BUTTON', 'BATTERY_CRITICAL', 'SENTINEL_AI_TRIGGER', 'FAKE_CALL'], 
         default: 'PANIC_BUTTON'
     },
     location: {
-        latitude: { type: Number, required: true },
-        longitude: { type: Number, required: true },
-        address: { type: String } // Optional address
+        // ✅ SAFETY UPDATE: Added defaults so it won't crash if GPS is 0
+        latitude: { type: Number, default: 0 },
+        longitude: { type: Number, default: 0 },
+        address: { type: String, default: '' }
     },
     audioUrl: {
-        type: String // URL to the audio evidence
+        type: String 
+    },
+    // ✅ NEW ADDITION: Needed for the "Watch Live" email button
+    videoLink: {
+        type: String 
     },
     status: {
         type: String,
