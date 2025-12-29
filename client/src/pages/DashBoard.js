@@ -1,4 +1,5 @@
 // File: client/src/pages/Dashboard.js
+import FallDetector from '../components/FallDetector';
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -8,7 +9,7 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(false);
   const [batteryLevel, setBatteryLevel] = useState(100);
   const alertSentRef = useRef(false);
-  
+
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -85,26 +86,26 @@ const Dashboard = () => {
     const sendToCloud = async (locData) => {
       try {
         setStatus('☁️ TRANSMITTING DATA...');
-        
+
         const formData = new FormData();
         formData.append('userId', userId);
         formData.append('type', alertType);
         formData.append('latitude', locData.latitude);
         formData.append('longitude', locData.longitude);
         formData.append('address', locData.address || '');
-        formData.append('videoLink', watchLink); 
+        formData.append('videoLink', watchLink);
 
         if (audioBlob) {
-            formData.append('audio', audioBlob, 'evidence.webm');
+          formData.append('audio', audioBlob, 'evidence.webm');
         }
 
         await axios.post('https://ghost-backend-fq2h.onrender.com/api/alerts', formData, {
-            headers: { 'Content-Type': 'multipart/form-data' }
+          headers: { 'Content-Type': 'multipart/form-data' }
         });
 
         setStatus('✅ ALERT SENT! STARTING CAMERA...');
         setTimeout(() => {
-            navigate('/stream');
+          navigate('/stream');
         }, 1500);
 
       } catch (error) {
@@ -117,13 +118,13 @@ const Dashboard = () => {
     // --- NEW GPS LOGIC ---
     // If we already have location from Sentinel, USE IT!
     if (preLocation && preLocation.latitude !== 0) {
-        console.log("Using Pre-Fetched GPS:", preLocation);
-        sendToCloud({
-            latitude: preLocation.latitude,
-            longitude: preLocation.longitude,
-            address: 'AI Auto-Lock'
-        });
-        return;
+      console.log("Using Pre-Fetched GPS:", preLocation);
+      sendToCloud({
+        latitude: preLocation.latitude,
+        longitude: preLocation.longitude,
+        address: 'AI Auto-Lock'
+      });
+      return;
     }
 
     // Otherwise, try to get it normally
@@ -151,6 +152,7 @@ const Dashboard = () => {
 
   return (
     <div className="dashboard-container">
+      <FallDetector onTrigger={() => handlePanic('CRASH_DETECTED')} />
       <div className="header-section">
         <h2>Safe Zone</h2>
         <p>GHOST PROTOCOL: <span style={{ color: '#32d74b' }}>ACTIVE</span></p>

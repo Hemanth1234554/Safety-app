@@ -10,7 +10,7 @@ const alertSchema = new mongoose.Schema({
     type: {
         type: String,
         // ✅ CORRECT: This list allows the Sentinel AI to work
-        enum: ['PANIC_BUTTON', 'BATTERY_CRITICAL', 'SENTINEL_AI_TRIGGER', 'FAKE_CALL'], 
+        enum: ['PANIC_BUTTON', 'BATTERY_CRITICAL', 'SENTINEL_AI_TRIGGER', 'FAKE_CALL', 'CRASH_DETECTED'],
         default: 'PANIC_BUTTON'
     },
     location: {
@@ -20,11 +20,11 @@ const alertSchema = new mongoose.Schema({
         address: { type: String, default: '' }
     },
     audioUrl: {
-        type: String 
+        type: String
     },
     // ✅ NEW ADDITION: Needed for the "Watch Live" email button
     videoLink: {
-        type: String 
+        type: String
     },
     status: {
         type: String,
