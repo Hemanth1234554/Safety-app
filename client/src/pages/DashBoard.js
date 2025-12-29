@@ -1,8 +1,8 @@
 // File: client/src/pages/Dashboard.js
-import FallDetector from '../components/FallDetector';
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useNavigate, useLocation } from 'react-router-dom';
+import FallDetector from '../components/FallDetector.js';
 
 const Dashboard = () => {
   const [status, setStatus] = useState('SYSTEM STANDBY');
