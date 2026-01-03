@@ -2,14 +2,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useNavigate, useLocation } from 'react-router-dom';
-import FallDetector from '../components/FallDetector.js';
+import FallDetector from '../components/FallDetector.js'; // Ensure path is correct
+import DeadMode from '../components/DeadMode.js';         // <--- NEW IMPORT
 
 const Dashboard = () => {
   const [status, setStatus] = useState('SYSTEM STANDBY');
   const [loading, setLoading] = useState(false);
   const [batteryLevel, setBatteryLevel] = useState(100);
+  const [isDeadMode, setIsDeadMode] = useState(false); // <--- NEW STATE
   const alertSentRef = useRef(false);
-
+  
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -20,7 +22,6 @@ const Dashboard = () => {
   // --- SENTINEL AI TRIGGER LISTENER ---
   useEffect(() => {
     if (location.state && location.state.autoSOS) {
-      // Pass the pre-fetched location to the handler
       handlePanic('SENTINEL_AI_TRIGGER', location.state.preLocation);
       window.history.replaceState({}, document.title);
     }
@@ -71,8 +72,6 @@ const Dashboard = () => {
     });
   };
 
-  // --- MODIFIED SOS FUNCTION ---
-  // Now accepts 'preLocation' as a second argument
   const handlePanic = async (alertType = 'PANIC_BUTTON', preLocation = null) => {
     setStatus('INITIALIZING EMERGENCY SEQUENCE...');
     setLoading(true);
@@ -86,26 +85,26 @@ const Dashboard = () => {
     const sendToCloud = async (locData) => {
       try {
         setStatus('☁️ TRANSMITTING DATA...');
-
+        
         const formData = new FormData();
         formData.append('userId', userId);
         formData.append('type', alertType);
         formData.append('latitude', locData.latitude);
         formData.append('longitude', locData.longitude);
         formData.append('address', locData.address || '');
-        formData.append('videoLink', watchLink);
+        formData.append('videoLink', watchLink); 
 
         if (audioBlob) {
-          formData.append('audio', audioBlob, 'evidence.webm');
+            formData.append('audio', audioBlob, 'evidence.webm');
         }
 
         await axios.post('https://ghost-backend-fq2h.onrender.com/api/alerts', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' }
+            headers: { 'Content-Type': 'multipart/form-data' }
         });
 
         setStatus('✅ ALERT SENT! STARTING CAMERA...');
         setTimeout(() => {
-          navigate('/stream');
+            navigate('/stream');
         }, 1500);
 
       } catch (error) {
@@ -115,19 +114,16 @@ const Dashboard = () => {
       }
     };
 
-    // --- NEW GPS LOGIC ---
-    // If we already have location from Sentinel, USE IT!
     if (preLocation && preLocation.latitude !== 0) {
-      console.log("Using Pre-Fetched GPS:", preLocation);
-      sendToCloud({
-        latitude: preLocation.latitude,
-        longitude: preLocation.longitude,
-        address: 'AI Auto-Lock'
-      });
-      return;
+        console.log("Using Pre-Fetched GPS:", preLocation);
+        sendToCloud({
+            latitude: preLocation.latitude,
+            longitude: preLocation.longitude,
+            address: 'AI Auto-Lock'
+        });
+        return;
     }
 
-    // Otherwise, try to get it normally
     setStatus('🛰️ ACQUIRING GPS...');
     if (!navigator.geolocation) {
       sendToCloud({ latitude: 0, longitude: 0, address: 'GPS Not Supported' });
@@ -152,7 +148,10 @@ const Dashboard = () => {
 
   return (
     <div className="dashboard-container">
+      {/* SENSORS & MODES */}
       <FallDetector onTrigger={() => handlePanic('CRASH_DETECTED')} />
+      <DeadMode active={isDeadMode} onExit={() => setIsDeadMode(false)} />
+
       <div className="header-section">
         <h2>Safe Zone</h2>
         <p>GHOST PROTOCOL: <span style={{ color: '#32d74b' }}>ACTIVE</span></p>
@@ -171,6 +170,12 @@ const Dashboard = () => {
         <button className="spy-btn" onClick={() => navigate('/fake-call')}><span>📱</span> FAKE CALL</button>
         <button className="spy-btn" onClick={() => navigate('/stream')} style={{ background: '#004400' }}>👁️ GHOST EYE (MANUAL)</button>
         <button className="spy-btn" onClick={() => navigate('/sentinel')} style={{ background: '#4a0000' }}>🤖 SENTINEL AI</button>
+        
+        {/* NEW DEAD MODE BUTTON */}
+        <button className="spy-btn" onClick={() => setIsDeadMode(true)} style={{ background: '#000', border: '1px solid #333' }}>
+            🪦 DEAD MODE
+        </button>
+        
         <button className="spy-btn danger" onClick={() => navigate('/settings')}><span>⚙️</span> SETTINGS</button>
       </div>
     </div>
